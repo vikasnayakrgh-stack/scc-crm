@@ -1,0 +1,5 @@
+{
+  "name": "SCC Recruitment CRM",
+  "description": "Mobile-first CRM for Shree Career Consultancy with offline support and Supabase sync.",
+  "requestFramePermissions": []
+}
