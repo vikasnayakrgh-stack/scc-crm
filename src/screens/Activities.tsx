@@ -9,28 +9,40 @@ export default function Activities() {
   const [gasUrl, setGasUrl] = useState(localStorage.getItem('scc_gas_url') || '');
   const [syncing, setSyncing] = useState(false);
 
+  const validateGasUrl = (url: string): boolean => {
+    try {
+      const u = new URL(url);
+      return u.hostname === 'script.google.com' && u.pathname.startsWith('/macros/s/');
+    } catch {
+      return false;
+    }
+  };
+
   const handleSync = async () => {
     if (!gasUrl) {
-        toast.error("Google Apps Script URL missing!");
-        return;
+      toast.error("Google Apps Script URL missing!");
+      return;
+    }
+    if (!validateGasUrl(gasUrl)) {
+      toast.error("Invalid GAS URL. Must be from script.google.com/macros/s/...");
+      return;
     }
     setSyncing(true);
     try {
-        const payload = { candidates, jobs, interviews, call_logs: callLogs };
-        // Using no-cors mode usually for GAS triggers, but for actual response feedback, standard POST is better.
-        // However, GAS often has CORS issues. We assume the GAS is deployed correctly as Web App with 'Everyone' access.
-        await fetch(gasUrl, {
-            method: 'POST',
-            mode: 'no-cors', 
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        localStorage.setItem('scc_gas_url', gasUrl);
-        toast.success("Sync command sent to Google Sheet!");
+      const payload = { candidates, jobs, interviews, call_logs: callLogs };
+      const response = await fetch(gasUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      localStorage.setItem('scc_gas_url', gasUrl);
+      toast.success("Sync successful to Google Sheet!");
     } catch (e) {
-        toast.error("Sync failed.");
+      toast.error("Sync failed. Check GAS deployment and CORS settings.");
+      console.error(e);
     } finally {
-        setSyncing(false);
+      setSyncing(false);
     }
   };
 
@@ -45,11 +57,12 @@ export default function Activities() {
           </h2>
           <div className="space-y-2">
             <Label>Apps Script URL</Label>
-            <Input 
-                value={gasUrl} 
-                onChange={e => setGasUrl(e.target.value)} 
-                placeholder="https://script.google.com/macros/s/..." 
+            <Input
+                value={gasUrl}
+                onChange={e => setGasUrl(e.target.value)}
+                placeholder="https://script.google.com/macros/s/..."
                 className="text-xs"
+                error={gasUrl && !validateGasUrl(gasUrl) ? 'Invalid GAS URL format' : undefined}
             />
             <Button onClick={handleSync} disabled={syncing} className="w-full mt-2">
                 {syncing ? 'Syncing...' : 'Sync Now -> Google Sheet'}
@@ -74,6 +87,7 @@ export default function Activities() {
                   </span>
               </div>
           ))}
+          {callLogs.length === 0 && <p className="text-center text-slate-500 mt-4">No call logs yet.</p>}
        </div>
     </div>
   );

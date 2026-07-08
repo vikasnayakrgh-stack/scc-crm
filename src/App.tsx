@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { HashRouter, Routes, Route, NavLink, useLocation } from 'react-router-dom';
+import { HashRouter, Routes, Route, NavLink } from 'react-router-dom';
 import { DataProvider, useData } from './context/DataContext';
 import { UserProvider, useUser } from './context/UserContext';
 import { USERS } from './types';
@@ -8,12 +8,13 @@ import Candidates from './screens/Candidates';
 import Jobs from './screens/Jobs';
 import Interviews from './screens/Interviews';
 import Activities from './screens/Activities';
-import { LayoutDashboard, Users, Briefcase, Calendar, Settings, WifiOff, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, Briefcase, Calendar, Settings, WifiOff, AlertCircle } from 'lucide-react';
 import { Toaster } from 'react-hot-toast';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 function AppContent() {
   const { currentUser, setCurrentUser } = useUser();
-  const { isOffline } = useData();
+  const { isOffline, pendingCount } = useData();
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 max-w-[430px] mx-auto border-x border-slate-200 shadow-2xl relative">
@@ -26,7 +27,14 @@ function AppContent() {
         </div>
       )}
 
-      {/* Top Bar (Only visible if authenticated, essentially always) */}
+      {/* Pending Sync Banner */}
+      {pendingCount > 0 && !isOffline && (
+        <div className="bg-amber-600 text-white text-xs text-center py-1 font-bold flex justify-center items-center gap-2 sticky top-0 z-50">
+           <AlertCircle size={12} /> {pendingCount} change{pendingCount > 1 ? 's' : ''} pending sync
+        </div>
+      )}
+
+      {/* Top Bar */}
       <div className="bg-white px-4 py-2 flex justify-between items-center shadow-sm sticky top-0 z-40">
         <span className="font-bold text-blue-700 tracking-tight">SCC CRM</span>
         <select 
@@ -64,7 +72,7 @@ function AppContent() {
 const NavItem = ({ to, icon: Icon, label }: any) => (
   <NavLink 
     to={to} 
-    className={({ isActive }) => 
+    className={({ isActive }) =>
         `flex flex-col items-center gap-1 p-2 rounded-lg transition-colors ${isActive ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`
     }
   >
@@ -75,12 +83,14 @@ const NavItem = ({ to, icon: Icon, label }: any) => (
 
 export default function App() {
   return (
-    <UserProvider>
-      <DataProvider>
-        <HashRouter>
-            <AppContent />
-        </HashRouter>
-      </DataProvider>
-    </UserProvider>
+    <ErrorBoundary>
+      <UserProvider>
+        <DataProvider>
+          <HashRouter>
+              <AppContent />
+          </HashRouter>
+        </DataProvider>
+      </UserProvider>
+    </ErrorBoundary>
   );
 }

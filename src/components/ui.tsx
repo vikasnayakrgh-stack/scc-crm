@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 
-export const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'success' }> = ({ className, variant = 'primary', ...props }) => {
+export const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'success' }> = ({ className, variant = 'primary', children, disabled, ...props }) => {
   const baseStyle = "px-4 py-2 rounded-lg font-medium transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed";
   const variants = {
     primary: "bg-blue-600 text-white hover:bg-blue-700 shadow-md shadow-blue-200",
@@ -9,12 +9,31 @@ export const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { 
     success: "bg-green-600 text-white hover:bg-green-700 shadow-md shadow-green-200"
   };
   
-  return <button className={`${baseStyle} ${variants[variant]} ${className || ''}`} {...props} />;
+  return <button className={`${baseStyle} ${variants[variant]} ${className || ''}`} disabled={disabled} {...props}>{children}</button>;
 };
 
-export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(({ className, ...props }, ref) => (
-  <input ref={ref} className={`w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${className}`} {...props} />
-));
+export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  label?: string;
+  error?: string;
+}
+
+export const Input = React.forwardRef<HTMLInputElement, InputProps>(({ className, label, error, id, ...props }, ref) => {
+  const inputId = id || label?.toLowerCase().replace(/\s+/g, '-');
+  return (
+    <div className="w-full">
+      {label && <label htmlFor={inputId} className="block text-sm font-medium text-slate-700 mb-1">{label}</label>}
+      <input
+        ref={ref}
+        id={inputId}
+        className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 ${error ? 'border-red-300 focus:ring-red-500' : 'border-slate-300 focus:ring-blue-500'} ${className}`}
+        aria-invalid={error ? 'true' : 'false'}
+        aria-describedby={error ? `${inputId}-error` : undefined}
+        {...props}
+      />
+      {error && <p id={`${inputId}-error`} className="mt-1 text-sm text-red-600" role="alert">{error}</p>}
+    </div>
+  );
+});
 
 export const Label: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <label className="block text-sm font-medium text-slate-700 mb-1">{children}</label>
@@ -25,13 +44,21 @@ export const Badge: React.FC<{ children: React.ReactNode, color?: string }> = ({
 );
 
 export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode }> = ({ isOpen, onClose, title, children }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handleEsc);
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', handleEsc); document.body.style.overflow = ''; };
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center p-4 border-b">
-          <h3 className="text-lg font-bold text-slate-800">{title}</h3>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-800 text-2xl">&times;</button>
+          <h3 id="modal-title" className="text-lg font-bold text-slate-800">{title}</h3>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-800 text-2xl leading-none" aria-label="Close modal">&times;</button>
         </div>
         <div className="p-4">{children}</div>
       </div>
