@@ -5,6 +5,7 @@ import { Button, Modal, Label, Badge, CardSkeleton, Input } from '../components/
 import { Plus, User, Briefcase } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { Application, ApplicationStage } from '../types';
+import { reconcileCandidateStatus } from '../lib/placementReconciliation';
 
 const STAGES: ApplicationStage[] = [
   'Applied',
@@ -89,6 +90,16 @@ export default function Applications() {
 
   const handleStageTransition = async (appId: string, nextStage: ApplicationStage) => {
     try {
+      const targetApp = applications.find((a) => a.id === appId);
+      if (!targetApp) {
+        toast.error('Application not found');
+        return;
+      }
+
+      if (targetApp.stage === nextStage) {
+        return; // Idempotent: already in this stage
+      }
+
       const updates: Partial<Application> = {
         id: appId,
         stage: nextStage,
@@ -102,12 +113,22 @@ export default function Applications() {
 
       await update('applications', updates);
 
-      if (nextStage === 'Placed') {
-        // Also update candidate status to Placed
-        const app = applications.find((a) => a.id === appId);
-        if (app) {
-          await update('candidates', { id: app.candidate_id, status: 'Placed' });
+      // Reconcile candidate status if candidate exists
+      const candidate = candidates.find((c) => c.id === targetApp.candidate_id);
+      if (candidate) {
+        const reconciliation = reconcileCandidateStatus(
+          candidate,
+          applications,
+          appId,
+          nextStage
+        );
+
+        if (candidate.status !== reconciliation.newStatus) {
+          await update('candidates', { id: candidate.id, status: reconciliation.newStatus });
         }
+      }
+
+      if (nextStage === 'Placed') {
         toast.success('🎉 Candidate placed! Remember to generate placement fee invoice in Payments tab.');
       } else {
         toast.success(`Application moved to stage: ${nextStage}`);

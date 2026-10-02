@@ -102,6 +102,62 @@ export const removeQueuedMutation = async (id: string): Promise<void> => {
   });
 };
 
+// Persist an updated mutation (e.g. incremented retryCount, lastAttemptAt, errorMessage) back to IndexedDB
+export const updateQueuedMutation = async (mutation: QueuedMutation): Promise<void> => {
+  const db = await getOfflineDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(QUEUE_STORE, 'readwrite');
+    const store = tx.objectStore(QUEUE_STORE);
+    const req = store.put(mutation);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(tx.error || new Error('Failed to persist queued mutation update'));
+  });
+};
+
+// Calculate exponential backoff delay based on retry count
+export const calculateBackoffDelay = (
+  retryCount: number,
+  baseDelayMs: number = 1000,
+  maxDelayMs: number = 30000
+): number => {
+  if (retryCount <= 0) return 0;
+  // retryCount 1: 1000ms, 2: 2000ms, 3: 4000ms, 4: 8000ms, 5: 16000ms...
+  const delay = baseDelayMs * Math.pow(2, retryCount - 1);
+  return Math.min(delay, maxDelayMs);
+};
+
+// Check if a queued mutation has served its backoff cooldown
+export const isMutationReadyForRetry = (
+  mutation: QueuedMutation,
+  now: number = Date.now(),
+  baseDelayMs: number = 1000,
+  maxDelayMs: number = 30000
+): boolean => {
+  if (!mutation.retryCount || !mutation.lastAttemptAt) return true;
+  const delay = calculateBackoffDelay(mutation.retryCount, baseDelayMs, maxDelayMs);
+  return now - mutation.lastAttemptAt >= delay;
+};
+
+// Close open IndexedDB connection (simulates app restart or reload)
+export const closeOfflineDb = (): void => {
+  if (dbInstance) {
+    if (typeof dbInstance.close === 'function') {
+      dbInstance.close();
+    }
+    dbInstance = null;
+  }
+};
+
+// Reset queue processing lock for testing or disaster recovery
+export const resetQueueProcessingStateForTesting = (): void => {
+  isProcessingQueue = false;
+};
+
+const isOnline = (): boolean => {
+  if (typeof navigator === 'undefined') return true;
+  return navigator.onLine !== false;
+};
+
 // Move a poisoned/permanently failing mutation to Dead Letter Queue (DLQ)
 export const moveToDeadLetterQueue = async (
   mutation: QueuedMutation,
@@ -166,23 +222,61 @@ export const isPermanentError = (error: any): boolean => {
   return false;
 };
 
-// Concurrency guarded queue processor
+// Helper to handle transient retry calculation and persistence
+const handleTransientRetry = async (
+  mutation: QueuedMutation,
+  errorMsg: string,
+  attemptTime: number
+): Promise<{ dlq: boolean }> => {
+  mutation.retryCount = (mutation.retryCount || 0) + 1;
+  mutation.lastAttemptAt = attemptTime;
+  mutation.errorMessage = errorMsg;
+
+  if (mutation.retryCount >= 5) {
+    await moveToDeadLetterQueue(
+      mutation,
+      'Exceeded max retries: ' + mutation.errorMessage
+    );
+    return { dlq: true };
+  } else {
+    // Persist the updated retry count and timestamp to IndexedDB
+    await updateQueuedMutation(mutation);
+    return { dlq: false };
+  }
+};
+
+// Concurrency guarded queue processor with persisted retry count and exponential backoff
 export const processOfflineQueue = async (
-  executor: (mutation: QueuedMutation) => Promise<{ error: any }>
+  executor: (mutation: QueuedMutation) => Promise<{ error: any }>,
+  options?: {
+    now?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    skipBackoffCheck?: boolean;
+  }
 ): Promise<{ processed: number; failed: number; deadLettered: number }> => {
   if (isProcessingQueue) return { processed: 0, failed: 0, deadLettered: 0 };
-  if (!navigator.onLine) return { processed: 0, failed: 0, deadLettered: 0 };
+  if (!isOnline()) return { processed: 0, failed: 0, deadLettered: 0 };
 
   isProcessingQueue = true;
   let processed = 0;
   let failed = 0;
   let deadLettered = 0;
 
+  const now = options?.now ?? Date.now();
+  const baseDelayMs = options?.baseDelayMs ?? 1000;
+  const maxDelayMs = options?.maxDelayMs ?? 30000;
+
   try {
     const queue = await getPendingMutations();
 
     for (const mutation of queue) {
-      if (!navigator.onLine) break; // Network lost mid-sync
+      if (!isOnline()) break; // Network lost mid-sync
+
+      // Backoff check: skip items still in backoff cooldown unless explicitly skipped
+      if (!options?.skipBackoffCheck && !isMutationReadyForRetry(mutation, now, baseDelayMs, maxDelayMs)) {
+        continue;
+      }
 
       try {
         const { error } = await executor(mutation);
@@ -195,21 +289,25 @@ export const processOfflineQueue = async (
           await moveToDeadLetterQueue(mutation, error.message || 'Constraint error');
           deadLettered++;
         } else {
-          // Transient network/timeout error -> Exponential backoff retry
-          mutation.retryCount = (mutation.retryCount || 0) + 1;
-          mutation.lastAttemptAt = Date.now();
-          if (mutation.retryCount >= 5) {
-            // Exceeded max retries -> Move to DLQ
-            await moveToDeadLetterQueue(mutation, 'Exceeded max retries: ' + (error.message || 'Network error'));
+          // Transient network/timeout error -> Exponential backoff retry with persistence
+          const { dlq } = await handleTransientRetry(mutation, error.message || 'Network error', now);
+          if (dlq) {
             deadLettered++;
+          } else {
+            failed++;
           }
-          failed++;
         }
       } catch (err: any) {
-        failed++;
         if (isPermanentError(err)) {
-          await moveToDeadLetterQueue(mutation, err.message || 'Execution error');
+          await moveToDeadLetterQueue(mutation, err?.message || 'Execution error');
           deadLettered++;
+        } else {
+          const { dlq } = await handleTransientRetry(mutation, err?.message || 'Execution error', now);
+          if (dlq) {
+            deadLettered++;
+          } else {
+            failed++;
+          }
         }
       }
     }
