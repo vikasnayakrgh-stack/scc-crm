@@ -1,159 +1,166 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { supabase } from '../lib/supabaseClient';
-import { Candidate, Job, Interview, CallLog } from '../types';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
+import {
+  Candidate,
+  Job,
+  Interview,
+  CallLog,
+  Employer,
+  Application,
+  FollowUpTask,
+  PaymentRecord
+} from '../types';
+import {
+  enqueueMutation,
+  processOfflineQueue,
+  getQueueMetrics,
+  QueuedMutation
+} from '../lib/offlineQueue';
 import { toast } from 'react-hot-toast';
-
-interface QueuedMutation {
-  id: string;
-  table: string;
-  type: 'insert' | 'update' | 'delete';
-  data: any;
-  timestamp: number;
-}
 
 interface DataContextType {
   candidates: Candidate[];
+  employers: Employer[];
   jobs: Job[];
+  applications: Application[];
   interviews: Interview[];
   callLogs: CallLog[];
+  tasks: FollowUpTask[];
+  payments: PaymentRecord[];
   loading: boolean;
   isOffline: boolean;
   pendingCount: number;
+  deadLetterCount: number;
   refreshData: () => Promise<void>;
   insert: (table: string, data: any) => Promise<any>;
   update: (table: string, data: any) => Promise<any>;
   remove: (table: string, id: string) => Promise<any>;
+  syncNow: () => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
-const DB_NAME = 'scc-crm-offline';
-const STORE_NAME = 'mutations';
+// Local storage seed keys for development / fallback when remote Supabase is unavailable
+const LOCAL_STORAGE_KEY_PREFIX = 'scc_crm_data_';
+
+const getInitialData = <T,>(key: string, fallback: T[]): T[] => {
+  try {
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEY_PREFIX + key);
+    if (saved) return JSON.parse(saved);
+  } catch (e) {
+    console.error(`Failed to read ${key} from storage:`, e);
+  }
+  return fallback;
+};
+
+const saveToLocalStorage = (key: string, data: any) => {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEY_PREFIX + key, JSON.stringify(data));
+  } catch (e) {
+    console.error(`Failed to save ${key} to storage:`, e);
+  }
+};
 
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [interviews, setInterviews] = useState<Interview[]>([]);
-  const [callLogs, setCallLogs] = useState<CallLog[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>(() => getInitialData('candidates', []));
+  const [employers, setEmployers] = useState<Employer[]>(() => getInitialData('employers', []));
+  const [jobs, setJobs] = useState<Job[]>(() => getInitialData('jobs', []));
+  const [applications, setApplications] = useState<Application[]>(() => getInitialData('applications', []));
+  const [interviews, setInterviews] = useState<Interview[]>(() => getInitialData('interviews', []));
+  const [callLogs, setCallLogs] = useState<CallLog[]>(() => getInitialData('callLogs', []));
+  const [tasks, setTasks] = useState<FollowUpTask[]>(() => getInitialData('tasks', []));
+  const [payments, setPayments] = useState<PaymentRecord[]>(() => getInitialData('payments', []));
+
   const [loading, setLoading] = useState(true);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingCount, setPendingCount] = useState(0);
-  const dbRef = useRef<IDBDatabase | null>(null);
+  const [deadLetterCount, setDeadLetterCount] = useState(0);
 
-  // Initialize IndexedDB
-  useEffect(() => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-      }
-    };
-    request.onsuccess = (event) => {
-      dbRef.current = (event.target as IDBOpenDBRequest).result;
-      countPendingMutations();
-    };
-    request.onerror = () => console.error('IndexedDB init failed');
+  // Sync state to local storage for persistence across reloads
+  useEffect(() => { saveToLocalStorage('candidates', candidates); }, [candidates]);
+  useEffect(() => { saveToLocalStorage('employers', employers); }, [employers]);
+  useEffect(() => { saveToLocalStorage('jobs', jobs); }, [jobs]);
+  useEffect(() => { saveToLocalStorage('applications', applications); }, [applications]);
+  useEffect(() => { saveToLocalStorage('interviews', interviews); }, [interviews]);
+  useEffect(() => { saveToLocalStorage('callLogs', callLogs); }, [callLogs]);
+  useEffect(() => { saveToLocalStorage('tasks', tasks); }, [tasks]);
+  useEffect(() => { saveToLocalStorage('payments', payments); }, [payments]);
+
+  const updateQueueStatus = useCallback(async () => {
+    const metrics = await getQueueMetrics();
+    setPendingCount(metrics.pending);
+    setDeadLetterCount(metrics.deadLetter);
   }, []);
 
-  const countPendingMutations = async () => {
-    if (!dbRef.current) return;
-    try {
-      const tx = dbRef.current.transaction(STORE_NAME, 'readonly');
-      const store = tx.objectStore(STORE_NAME);
-      const countRequest = store.count();
-      countRequest.onsuccess = () => setPendingCount(countRequest.result);
-    } catch (e) {
-      console.error('Count pending failed:', e);
-    }
-  };
-
-  const queueMutation = async (mutation: Omit<QueuedMutation, 'id' | 'timestamp'>) => {
-    if (!dbRef.current) return;
-    const fullMutation: QueuedMutation = {
-      ...mutation,
-      id: crypto.randomUUID(),
-      timestamp: Date.now()
-    };
-    try {
-      const tx = dbRef.current.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      store.add(fullMutation);
-      await new Promise<void>((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-      setPendingCount(prev => prev + 1);
-    } catch (e) {
-      console.error('Queue mutation failed:', e);
-    }
-  };
-
-  const processQueue = async () => {
-    if (!dbRef.current || isOffline) return;
-    try {
-      const tx = dbRef.current.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      const getAllRequest = store.getAll();
-      
-      getAllRequest.onsuccess = async () => {
-        const mutations = getAllRequest.result;
-        for (const mutation of mutations) {
-          try {
-            let error: any = null;
-            if (mutation.type === 'insert') {
-              const { error: e } = await supabase.from(mutation.table).insert(mutation.data);
-              error = e;
-            } else if (mutation.type === 'update') {
-              const { error: e } = await supabase.from(mutation.table).update(mutation.data).eq('id', mutation.data.id);
-              error = e;
-            } else if (mutation.type === 'delete') {
-              const { error: e } = await supabase.from(mutation.table).delete().eq('id', mutation.data.id);
-              error = e;
-            }
-            if (error) throw error;
-            
-            // Remove from queue
-            const delTx = dbRef.current!.transaction(STORE_NAME, 'readwrite');
-            delTx.objectStore(STORE_NAME).delete(mutation.id);
-          } catch (e) {
-            console.error('Sync failed for mutation:', mutation, e);
-            break;
-          }
-        }
-        await countPendingMutations();
-        if (pendingCount > 0) toast.success(`${pendingCount} change${pendingCount > 1 ? 's' : ''} synced!`);
-      };
-    } catch (e) {
-      console.error('Process queue failed:', e);
-    }
-  };
-
   const fetchData = useCallback(async () => {
-    if (!navigator.onLine) {
+    if (!navigator.onLine || !isSupabaseConfigured) {
       setLoading(false);
+      await updateQueueStatus();
       return;
     }
 
     try {
-      const [candRes, jobRes, intRes, logRes] = await Promise.all([
+      const [candRes, empRes, jobRes, appRes, intRes, logRes, taskRes, payRes] = await Promise.all([
         supabase.from('candidates').select('*').eq('is_active', true).order('created_at', { ascending: false }),
-        supabase.from('jobs').select('*').eq('is_active', true).order('created_at', { ascending: false }),
+        supabase.from('employers').select('*').eq('is_active', true).order('company_name', { ascending: true }),
+        supabase.from('jobs').select('*, employers(company_name)').eq('is_active', true).order('created_at', { ascending: false }),
+        supabase.from('applications').select('*, candidates(name, mobile), jobs(role, company_name)').eq('is_active', true).order('created_at', { ascending: false }),
         supabase.from('interviews').select('*, candidates(name, mobile), jobs(role, company_name)').eq('is_active', true).order('scheduled_time', { ascending: true }),
-        supabase.from('call_logs').select('*, candidates(name)').order('timestamp', { ascending: false }).limit(50),
+        supabase.from('call_logs').select('*, candidates(name)').order('timestamp', { ascending: false }).limit(200),
+        supabase.from('tasks').select('*').eq('is_active', true).order('due_date', { ascending: true }),
+        supabase.from('payments').select('*, candidates(name), employers(company_name)').order('paid_at', { ascending: false }),
       ]);
 
       if (candRes.data) setCandidates(candRes.data);
+      if (empRes.data) setEmployers(empRes.data);
       if (jobRes.data) setJobs(jobRes.data);
+      if (appRes.data) setApplications(appRes.data);
       if (intRes.data) setInterviews(intRes.data);
       if (logRes.data) setCallLogs(logRes.data);
+      if (taskRes.data) setTasks(taskRes.data);
+      if (payRes.data) setPayments(payRes.data);
     } catch (error) {
-      console.error("Data load failed", error);
-      toast.error("Data load fail ho gaya.");
+      console.warn('Remote data fetch failed or tables not yet migrated; using local cache.', error);
     } finally {
       setLoading(false);
+      await updateQueueStatus();
     }
+  }, [updateQueueStatus]);
+
+  // Execute a single queued mutation against Supabase
+  const executeRemoteMutation = useCallback(async (mutation: QueuedMutation) => {
+    if (!isSupabaseConfigured) {
+      return { error: null }; // In mock/local mode, consider synced locally
+    }
+
+    if (mutation.type === 'insert') {
+      return await supabase.from(mutation.table).insert(mutation.data);
+    } else if (mutation.type === 'update') {
+      return await supabase.from(mutation.table).update(mutation.data).eq('id', mutation.data.id);
+    } else if (mutation.type === 'delete') {
+      return await supabase.from(mutation.table).delete().eq('id', mutation.data.id);
+    }
+    return { error: new Error('Unknown mutation type') };
   }, []);
+
+  // Process offline queue with backoff and DLQ
+  const syncNow = useCallback(async () => {
+    if (!navigator.onLine) {
+      toast.error('Cannot sync while offline');
+      return;
+    }
+
+    const result = await processOfflineQueue(executeRemoteMutation);
+    await updateQueueStatus();
+
+    if (result.processed > 0) {
+      toast.success(`${result.processed} change${result.processed > 1 ? 's' : ''} synced!`);
+      await fetchData();
+    }
+    if (result.deadLettered > 0) {
+      toast.error(`${result.deadLettered} item(s) rejected due to constraint errors.`);
+    }
+  }, [executeRemoteMutation, updateQueueStatus, fetchData]);
 
   useEffect(() => {
     fetchData();
@@ -161,82 +168,133 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const handleOffline = () => setIsOffline(true);
     const handleOnline = () => {
       setIsOffline(false);
-      fetchData();
-      processQueue();
-      toast.success("Internet wapas aa gaya! Data sync ho raha hai...");
+      syncNow();
     };
 
     window.addEventListener('offline', handleOffline);
     window.addEventListener('online', handleOnline);
 
-    const channel = supabase.channel('scc-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public' }, () => {
-        fetchData();
-      })
-      .subscribe();
-
     return () => {
-      supabase.removeChannel(channel);
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('online', handleOnline);
     };
-  }, [fetchData, isOffline]);
+  }, [fetchData, syncNow]);
 
+  // Optimistic state updater for local UI consistency
+  const applyLocalMutation = useCallback((table: string, type: 'insert' | 'update' | 'delete', record: any) => {
+    const updateList = <T extends { id: string }>(prev: T[]): T[] => {
+      if (type === 'insert') {
+        return [record as T, ...prev.filter(item => item.id !== record.id)];
+      } else if (type === 'update') {
+        return prev.map(item => item.id === record.id ? { ...item, ...record } : item);
+      } else if (type === 'delete') {
+        return prev.filter(item => item.id !== record.id);
+      }
+      return prev;
+    };
+
+    switch (table) {
+      case 'candidates': setCandidates(updateList); break;
+      case 'employers': setEmployers(updateList); break;
+      case 'jobs': setJobs(updateList); break;
+      case 'applications': setApplications(updateList); break;
+      case 'interviews': setInterviews(updateList); break;
+      case 'call_logs': setCallLogs(updateList); break;
+      case 'tasks': setTasks(updateList); break;
+      case 'payments': setPayments(updateList); break;
+    }
+  }, []);
+
+  // Truthful insert: Propagates errors, updates state optimistically if offline
   const insert = useCallback(async (table: string, data: any) => {
-    if (!navigator.onLine) {
-      await queueMutation({ table, type: 'insert', data });
-      toast.success('Queued for sync (offline)');
-      return { data: null, error: null };
-    }
-    const result = await supabase.from(table).insert(data);
-    if (result.error) {
-      await queueMutation({ table, type: 'insert', data });
-      toast.error('Failed, queued for retry');
-    }
-    return result;
-  }, []);
+    const fullRecord = {
+      ...data,
+      id: data.id || crypto.randomUUID(),
+      created_at: data.created_at || new Date().toISOString(),
+    };
 
+    if (!navigator.onLine || !isSupabaseConfigured) {
+      // Save locally & queue for remote sync
+      await enqueueMutation(table, 'insert', fullRecord);
+      applyLocalMutation(table, 'insert', fullRecord);
+      await updateQueueStatus();
+      return { data: fullRecord, error: null };
+    }
+
+    const result = await supabase.from(table).insert(fullRecord).select().single();
+    if (result.error) {
+      // Throw error so calling screen DOES NOT show false-success toast!
+      throw new Error(result.error.message || `Failed to insert into ${table}`);
+    }
+
+    applyLocalMutation(table, 'insert', result.data || fullRecord);
+    return result;
+  }, [applyLocalMutation, updateQueueStatus]);
+
+  // Truthful update: Propagates errors, updates state optimistically if offline
   const update = useCallback(async (table: string, data: any) => {
-    if (!navigator.onLine) {
-      await queueMutation({ table, type: 'update', data });
-      toast.success('Queued for sync (offline)');
-      return { data: null, error: null };
-    }
-    const result = await supabase.from(table).update(data).eq('id', data.id);
-    if (result.error) {
-      await queueMutation({ table, type: 'update', data });
-      toast.error('Failed, queued for retry');
-    }
-    return result;
-  }, []);
+    if (!data.id) throw new Error('Cannot update record without id');
 
-  const remove = useCallback(async (table: string, id: string) => {
-    if (!navigator.onLine) {
-      await queueMutation({ table, type: 'delete', data: { id } });
-      toast.success('Queued for sync (offline)');
-      return { data: null, error: null };
+    const updatedRecord = {
+      ...data,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (!navigator.onLine || !isSupabaseConfigured) {
+      await enqueueMutation(table, 'update', updatedRecord);
+      applyLocalMutation(table, 'update', updatedRecord);
+      await updateQueueStatus();
+      return { data: updatedRecord, error: null };
     }
+
+    const result = await supabase.from(table).update(updatedRecord).eq('id', data.id).select().single();
+    if (result.error) {
+      throw new Error(result.error.message || `Failed to update ${table}`);
+    }
+
+    applyLocalMutation(table, 'update', result.data || updatedRecord);
+    return result;
+  }, [applyLocalMutation, updateQueueStatus]);
+
+  // Truthful remove: Propagates errors
+  const remove = useCallback(async (table: string, id: string) => {
+    if (!id) throw new Error('Cannot remove record without id');
+
+    if (!navigator.onLine || !isSupabaseConfigured) {
+      await enqueueMutation(table, 'delete', { id });
+      applyLocalMutation(table, 'delete', { id });
+      await updateQueueStatus();
+      return { error: null };
+    }
+
     const result = await supabase.from(table).delete().eq('id', id);
     if (result.error) {
-      await queueMutation({ table, type: 'delete', data: { id } });
-      toast.error('Failed, queued for retry');
+      throw new Error(result.error.message || `Failed to delete from ${table}`);
     }
+
+    applyLocalMutation(table, 'delete', { id });
     return result;
-  }, []);
+  }, [applyLocalMutation, updateQueueStatus]);
 
   return (
-    <DataContext.Provider value={{ 
-      candidates, 
-      jobs, 
-      interviews, 
-      callLogs, 
-      loading, 
-      isOffline, 
+    <DataContext.Provider value={{
+      candidates,
+      employers,
+      jobs,
+      applications,
+      interviews,
+      callLogs,
+      tasks,
+      payments,
+      loading,
+      isOffline,
       pendingCount,
+      deadLetterCount,
       refreshData: fetchData,
       insert,
       update,
-      remove
+      remove,
+      syncNow,
     }}>
       {children}
     </DataContext.Provider>

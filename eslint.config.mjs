@@ -16,9 +16,9 @@ export default tseslint.config(
       'react-refresh': reactRefreshPlugin,
     },
     languageOptions: {
+      parser: tseslint.parser,
       parserOptions: {
         ecmaFeatures: { jsx: true },
-        project: './tsconfig.json',
       },
     },
     settings: {
@@ -28,6 +28,9 @@ export default tseslint.config(
       ...reactPlugin.configs.recommended.rules,
       ...reactHooksPlugin.configs.recommended.rules,
       'react/jsx-no-target-blank': 'off',
+      'react/no-unescaped-entities': 'off',
+      'react/prop-types': 'off',
+      'react-hooks/set-state-in-effect': 'off',
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true },

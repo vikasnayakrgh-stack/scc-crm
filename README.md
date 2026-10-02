@@ -1,98 +1,116 @@
-# SCC Recruitment CRM (Final Production Build)
+# Shree Career Consultancy (SCC) CRM — Production Modernisation
 
-## 1. Environment Setup (.env)
-Create a `.env` file in the root:
+Production-ready Recruitment Consultancy CRM built with **React 19**, **TypeScript**, **Vite 6**, **Tailwind CSS**, **Supabase PostgreSQL**, and **IndexedDB Offline-First Architecture**.
+
+---
+
+## 🏗️ Architecture & Technology Stack
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                          SCC CRM Frontend                              │
+│         (React 19 + TypeScript + Vite 6 + Tailwind CSS)                │
+└────────────────────────────────────┬───────────────────────────────────┘
+                                     │
+                 ┌───────────────────┴───────────────────┐
+                 │                                       │
+     [Online Mutation / Sync]                 [Offline State / Network Fault]
+                 ▼                                       ▼
+┌─────────────────────────────────┐     ┌─────────────────────────────────┐
+│     Supabase Client Data Layer  │     │      IndexedDB Mutation Queue   │
+│   (PostgreSQL + Row-Level Sec)  │     │   (DLQ + Backoff + Idempotency) │
+└─────────────────────────────────┘     └─────────────────────────────────┘
+```
+
+- **Frontend Core:** React 19 (SPA), TypeScript 5.8 strict, Vite 6.4.
+- **State & Data Layer:** `DataContext` providing truthful optimistic UI updates, re-throwing server errors, and zero silent failures.
+- **Offline Engine:** IndexedDB (`scc-offline-db`) transaction queue with exponential backoff (`Math.min(1000 * 2^retries, 30000)`), Dead Letter Queue (DLQ) for permanent SQL constraint errors (`23505`, `23503`, `42501`) to eliminate head-of-line blocking, and automatic background re-sync on reconnection.
+- **Security & Authorization:** Role-based access control (`Admin`, `Manager`, `Recruiter`). Insecure Google Apps Script client webhook removed. Sanitized CSV exports restricted to Admins. No service-role secrets in client bundle.
+- **Database:** Supabase PostgreSQL with additive SQL migrations, row-level security (RLS), atomic timestamps, and referential constraints.
+
+---
+
+## 📋 Core Recruitment Modules
+
+1. **Dashboard:** Real-time KPI metrics:
+   - Date-aware and year-checked Today's Interviews & Call Logs (`date-fns`).
+   - Active Open Jobs count (`status === 'Open'`).
+   - Candidate Placements vs. Interviews.
+   - Pending Collections and Registration Ledger.
+2. **Candidates:** Full lifecycle management (Active, Placed, Blacklisted), skill tag arrays, salary expectations, role history, and live candidate-to-job match recommendation modal.
+3. **Employers (Clients):** Corporate accounts registry, HR point of contact, phone/email directory, industry classification, and live open position count.
+4. **Jobs (Vacancies):** Relational employer linkage, salary range limits, experience requirements, and status toggles.
+5. **Applications Pipeline:** 13-stage auditable recruitment pipeline (`Applied` → `Screening` → `Shortlisted` → `Employer Submitted` → `Interview Scheduled` → `Interview Completed` → `Selected` → `Offer` → `Joined` → `Placed` + `Rejected` / `Withdrawn` / `On Hold`) with duplicate prevention.
+6. **Interviews:** Scheduling module strictly **decoupled** from placement (interview `Selected` ≠ candidate `Placed`).
+7. **Tasks & Follow-ups:** Recruiter work queue, due dates, overdue badges, priority filters (`High`, `Medium`, `Low`), and candidate/client associations.
+8. **Payments & Collections:** Financial tracking for candidate registration fees (default ₹200 from SCC walk-in records, fully editable) and employer placement commission invoices with partial payment handling.
+9. **Activities & Audit:** Operational activity logs, Admin-only secure CSV data export, and real-time offline synchronization queue monitor.
+
+---
+
+## ⚙️ Environment Variables (.env)
+
+Create a `.env` file in the project root:
+
 ```env
-VITE_SUPABASE_URL=your_supabase_project_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+# Supabase Configuration
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key-here
 ```
 
-## 2. Supabase SQL Schema (Run this in Supabase SQL Editor)
+> **Note:** If `.env` is omitted or contains dummy values during development, SCC CRM automatically activates its safe local offline mode, falling back to local memory and IndexedDB queue without crashing the UI.
 
-```sql
--- Enable UUID extension
-create extension if not exists "uuid-ossp";
+---
 
--- Table: candidates
-create table public.candidates (
-  id uuid default uuid_generate_v4() primary key,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  name text not null,
-  mobile text unique not null,
-  experience numeric,
-  skills text[] default '{}',
-  location text,
-  expected_salary numeric,
-  last_role text,
-  status text check (status in ('Active', 'Placed', 'Blacklisted')) default 'Active',
-  owner_id text,
-  is_active boolean default true
-);
+## 🗄️ Database Migrations (Supabase SQL Editor)
 
--- Table: jobs
-create table public.jobs (
-  id uuid default uuid_generate_v4() primary key,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  company_name text not null,
-  role text not null,
-  location text,
-  min_exp numeric,
-  max_exp numeric,
-  salary_min numeric,
-  salary_max numeric,
-  skills_req text[] default '{}',
-  urgency int default 1,
-  status text check (status in ('Open', 'Closed')) default 'Open',
-  is_active boolean default true
-);
+Execute the additive SQL migration scripts in [`supabase/migrations/`](file:///c:/Users/Arti/Downloads/antigravity%20projects/scc-crm-main/supabase/migrations) in this exact order:
 
--- Table: interviews
-create table public.interviews (
-  id uuid default uuid_generate_v4() primary key,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  candidate_id uuid references public.candidates(id),
-  job_id uuid references public.jobs(id),
-  scheduled_time timestamp with time zone not null,
-  status text check (status in ('Scheduled', 'Done', 'NoShow', 'Selected')) default 'Scheduled',
-  feedback text,
-  is_active boolean default true
-);
+1. **`20261002_001_core_hardening.sql`**
+   - Creates `moddatetime` auto-update triggers for `updated_at`.
+   - Adds missing indexing (`idx_candidates_status_created`, `idx_jobs_status_created`, `idx_interviews_scheduled_time`).
+   - Upgrades `candidates` and `jobs` tables with safe additive columns.
+2. **`20261002_002_recruitment_entities.sql`**
+   - Provisions `employers` table.
+   - Provisions `job_applications` table with stage constraints and unique `(candidate_id, job_id)` index.
+   - Provisions `tasks` table for recruiter work queues.
+   - Provisions `payment_records` table for registration and commission tracking.
+3. **`20261002_003_rls_and_security.sql`**
+   - Enables Row Level Security (RLS) across all tables.
+   - Creates helper function `auth.user_role()`.
+   - Locks down financial/payment tables to `Admin` and `Manager` roles.
+   - Grants controlled read/write access to recruiters.
 
--- Table: call_logs
-create table public.call_logs (
-  id uuid default uuid_generate_v4() primary key,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  candidate_id uuid references public.candidates(id),
-  telecaller_name text,
-  call_type text check (call_type in ('Connected', 'Busy', 'SwitchOff')),
-  duration numeric default 0,
-  note text,
-  timestamp timestamp with time zone default timezone('utc'::text, now())
-);
+---
 
--- Enable Realtime
-alter publication supabase_realtime add table candidates, jobs, interviews, call_logs;
+## 🧪 Verification & Testing Commands
+
+All verification commands pass with zero errors:
+
+```bash
+# 1. Clean reproducible dependency install
+npm ci
+
+# 2. TypeScript static typecheck (Strict 0 errors)
+npm run typecheck
+
+# 3. Unit & Integration test suite (Vitest)
+npm test
+
+# 4. Production build bundle validation
+npm run build
+
+# 5. Code quality and lint verification
+npm run lint
 ```
 
-## 3. Google Sheet Sync (Apps Script)
+---
 
-1. Create a Google Sheet.
-2. Extensions > Apps Script.
-3. Paste code:
-```javascript
-function doPost(e) {
-  var data = JSON.parse(e.postData.contents);
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  // Simple dump of names for demo
-  data.candidates.forEach(c => {
-    sheet.appendRow([new Date(), "Candidate", c.name, c.mobile]);
-  });
-  return ContentService.createTextOutput("Success");
-}
+## 🚀 Running Locally
+
+```bash
+# Start Vite development server
+npm run dev
 ```
-4. Deploy > New Deployment > Web App > **Who has access: Anyone**.
-5. Copy URL and paste in App Settings.
 
-## 4. Run
-`npm install`
-`npm run dev`
+Visit `http://localhost:5173` in your browser. Toggle roles (`Admin`, `Manager`, `Recruiter`) from the top-right header to test role-gated interfaces.

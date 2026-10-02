@@ -34,6 +34,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(({ className
     </div>
   );
 });
+Input.displayName = 'Input';
 
 export const Label: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <label className="block text-sm font-medium text-slate-700 mb-1">{children}</label>

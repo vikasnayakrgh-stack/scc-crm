@@ -1,94 +1,234 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Button, Input, Label } from '../components/ui';
+import { useUser } from '../context/UserContext';
+import { Button, Badge } from '../components/ui';
 import { toast } from 'react-hot-toast';
-import { FileSpreadsheet, History } from 'lucide-react';
+import { FileSpreadsheet, History, Download, RefreshCw, ShieldAlert, WifiOff, CheckCircle } from 'lucide-react';
 
 export default function Activities() {
-  const { callLogs, candidates, jobs, interviews } = useData();
-  const [gasUrl, setGasUrl] = useState(localStorage.getItem('scc_gas_url') || '');
-  const [syncing, setSyncing] = useState(false);
+  const { callLogs, candidates, jobs, payments, isOffline, pendingCount, deadLetterCount, syncNow } = useData();
+  const { currentUser } = useUser();
+  const [exporting, setExporting] = useState(false);
 
-  const validateGasUrl = (url: string): boolean => {
-    try {
-      const u = new URL(url);
-      return u.hostname === 'script.google.com' && u.pathname.startsWith('/macros/s/');
-    } catch {
-      return false;
-    }
-  };
+  const isAdmin = currentUser === 'Admin';
 
-  const handleSync = async () => {
-    if (!gasUrl) {
-      toast.error("Google Apps Script URL missing!");
+  // Secure, role-gated CSV export function
+  const handleExportCSV = (type: 'candidates' | 'jobs' | 'payments') => {
+    if (!isAdmin) {
+      toast.error('Security Restriction: Only Admin can export CRM data.');
       return;
     }
-    if (!validateGasUrl(gasUrl)) {
-      toast.error("Invalid GAS URL. Must be from script.google.com/macros/s/...");
-      return;
-    }
-    setSyncing(true);
+
+    setExporting(true);
     try {
-      const payload = { candidates, jobs, interviews, call_logs: callLogs };
-      const response = await fetch(gasUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      localStorage.setItem('scc_gas_url', gasUrl);
-      toast.success("Sync successful to Google Sheet!");
+      let csvContent = '';
+      const filename = `scc_${type}_${new Date().toISOString().split('T')[0]}.csv`;
+
+      if (type === 'candidates') {
+        const headers = ['ID', 'Registration Date', 'Name', 'Mobile', 'Experience (Yrs)', 'Skills', 'Location', 'Expected Salary', 'Role', 'Status'];
+        const rows = candidates.map((c) => [
+          c.id,
+          new Date(c.created_at).toLocaleDateString('en-IN'),
+          `"${(c.name || '').replace(/"/g, '""')}"`,
+          c.mobile,
+          c.experience,
+          `"${(c.skills || []).join(', ')}"`,
+          `"${(c.location || '').replace(/"/g, '""')}"`,
+          c.expected_salary,
+          `"${(c.last_role || '').replace(/"/g, '""')}"`,
+          c.status,
+        ]);
+        csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+      } else if (type === 'jobs') {
+        const headers = ['ID', 'Date Created', 'Company Name', 'Role', 'Location', 'Min Exp', 'Max Exp', 'Min Salary', 'Max Salary', 'Status'];
+        const rows = jobs.map((j) => [
+          j.id,
+          new Date(j.created_at).toLocaleDateString('en-IN'),
+          `"${(j.company_name || '').replace(/"/g, '""')}"`,
+          `"${(j.role || '').replace(/"/g, '""')}"`,
+          `"${(j.location || '').replace(/"/g, '""')}"`,
+          j.min_exp,
+          j.max_exp,
+          j.salary_min,
+          j.salary_max,
+          j.status,
+        ]);
+        csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+      } else if (type === 'payments') {
+        const headers = ['ID', 'Date', 'Type', 'Amount', 'Payment Method', 'Status', 'Reference No', 'Recorded By'];
+        const rows = payments.map((p) => [
+          p.id,
+          new Date(p.paid_at || p.created_at).toLocaleDateString('en-IN'),
+          p.type,
+          p.amount,
+          p.payment_method,
+          p.status,
+          `"${(p.reference_no || '').replace(/"/g, '""')}"`,
+          p.recorded_by,
+        ]);
+        csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+      }
+
+      // Trigger browser download via Blob
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success(`${type.toUpperCase()} exported securely.`);
     } catch (e) {
-      toast.error("Sync failed. Check GAS deployment and CORS settings.");
+      toast.error('Export failed');
       console.error(e);
     } finally {
-      setSyncing(false);
+      setExporting(false);
     }
   };
 
   return (
-    <div className="p-4 pb-20">
-       <h1 className="text-xl font-bold text-slate-800 mb-4">Settings & Activity</h1>
+    <div className="p-4 pb-20 max-w-2xl mx-auto space-y-5">
+      <div>
+        <h1 className="text-xl font-bold text-slate-800">System & Operational Activity</h1>
+        <p className="text-xs text-slate-500">Sync status, audit history, and security controls</p>
+      </div>
 
-       {/* Google Sheet Sync Section */}
-       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-6">
-          <h2 className="font-bold text-slate-700 flex items-center gap-2 mb-2">
-            <FileSpreadsheet size={18} className="text-green-600" /> Google Sheet Sync
-          </h2>
-          <div className="space-y-2">
-            <Label>Apps Script URL</Label>
-            <Input
-                value={gasUrl}
-                onChange={e => setGasUrl(e.target.value)}
-                placeholder="https://script.google.com/macros/s/..."
-                className="text-xs"
-                error={gasUrl && !validateGasUrl(gasUrl) ? 'Invalid GAS URL format' : undefined}
-            />
-            <Button onClick={handleSync} disabled={syncing} className="w-full mt-2">
-                {syncing ? 'Syncing...' : 'Sync Now -> Google Sheet'}
-            </Button>
-            <p className="text-[10px] text-slate-400">Ensure GAS is deployed as "Web App" with access "Anyone".</p>
+      {/* Sync & Queue Monitor */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 space-y-3">
+        <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+          <RefreshCw size={16} className="text-blue-600" />
+          Offline Sync & Storage Engine
+        </h2>
+
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div className="p-2.5 bg-slate-50 rounded-lg">
+            <span className="text-slate-400 text-[10px] uppercase font-bold block">Network Mode</span>
+            <span className="font-semibold text-slate-700 flex items-center gap-1 mt-0.5">
+              {isOffline ? (
+                <>
+                  <WifiOff size={13} className="text-red-500" /> Offline (Local Queue)
+                </>
+              ) : (
+                <>
+                  <CheckCircle size={13} className="text-emerald-500" /> Online
+                </>
+              )}
+            </span>
           </div>
-       </div>
 
-       {/* All Call Logs */}
-       <h2 className="font-bold text-slate-700 flex items-center gap-2 mb-2">
-            <History size={18} className="text-blue-600" /> Recent Activities
-       </h2>
-       <div className="space-y-2">
-          {callLogs.map(log => (
-              <div key={log.id} className="bg-white p-3 rounded-lg border border-slate-100 shadow-sm flex justify-between items-center">
-                  <div>
-                      <p className="font-medium text-slate-800 text-sm">Called: {log.candidates?.name}</p>
-                      <p className="text-xs text-slate-500">by {log.telecaller_name} • {new Date(log.timestamp).toLocaleString()}</p>
-                  </div>
-                  <span className={`text-xs px-2 py-1 rounded ${log.call_type === 'Connected' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                      {log.call_type}
-                  </span>
+          <div className="p-2.5 bg-slate-50 rounded-lg">
+            <span className="text-slate-400 text-[10px] uppercase font-bold block">Pending Mutations</span>
+            <span className="font-semibold text-slate-700 mt-0.5 block">
+              {pendingCount} item{pendingCount === 1 ? '' : 's'} queued
+            </span>
+          </div>
+        </div>
+
+        {deadLetterCount > 0 && (
+          <div className="p-2.5 bg-red-50 text-red-700 rounded-lg text-xs flex items-center justify-between">
+            <span className="flex items-center gap-1.5 font-medium">
+              <ShieldAlert size={15} />
+              {deadLetterCount} constraint failure(s) in Dead Letter Queue (isolated from blocking sync)
+            </span>
+          </div>
+        )}
+
+        <Button onClick={() => syncNow()} className="w-full text-xs py-2 flex justify-center items-center gap-1.5">
+          <RefreshCw size={13} /> Synchronize Pending Queue Now
+        </Button>
+      </div>
+
+      {/* Role-Gated Secure Export */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 space-y-3">
+        <div className="flex justify-between items-center">
+          <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+            <FileSpreadsheet size={16} className="text-emerald-600" />
+            Controlled Data Export
+          </h2>
+          <Badge color={isAdmin ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}>
+            {isAdmin ? 'Admin Authorized' : 'Export Restricted'}
+          </Badge>
+        </div>
+
+        <p className="text-xs text-slate-500">
+          Unauthenticated public webhook exports have been retired for security compliance. Data export is restricted to authenticated Admin users with sanitized CSV downloads.
+        </p>
+
+        {isAdmin ? (
+          <div className="grid grid-cols-3 gap-2 pt-1">
+            <button
+              onClick={() => handleExportCSV('candidates')}
+              disabled={exporting}
+              className="p-2 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 flex flex-col items-center gap-1"
+            >
+              <Download size={14} className="text-blue-600" />
+              <span>Candidates</span>
+            </button>
+            <button
+              onClick={() => handleExportCSV('jobs')}
+              disabled={exporting}
+              className="p-2 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 flex flex-col items-center gap-1"
+            >
+              <Download size={14} className="text-purple-600" />
+              <span>Jobs</span>
+            </button>
+            <button
+              onClick={() => handleExportCSV('payments')}
+              disabled={exporting}
+              className="p-2 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 flex flex-col items-center gap-1"
+            >
+              <Download size={14} className="text-emerald-600" />
+              <span>Payments</span>
+            </button>
+          </div>
+        ) : (
+          <div className="p-3 bg-slate-50 rounded-lg text-xs text-slate-500 italic">
+            You are logged in as {currentUser}. Switch to Admin role in the top header to unlock export privileges.
+          </div>
+        )}
+      </div>
+
+      {/* Recent Activities Audit Feed */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 space-y-3">
+        <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+          <History size={16} className="text-blue-600" />
+          Recent Call Logs ({callLogs.length})
+        </h2>
+
+        <div className="space-y-2">
+          {callLogs.slice(0, 10).map((log) => {
+            const cand = candidates.find((c) => c.id === log.candidate_id) || log.candidates;
+            return (
+              <div
+                key={log.id}
+                className="bg-slate-50 p-2.5 rounded-lg flex justify-between items-center text-xs"
+              >
+                <div>
+                  <p className="font-semibold text-slate-800">{cand?.name || 'Candidate'}</p>
+                  <p className="text-[11px] text-slate-400">
+                    by {log.telecaller_name} • {new Date(log.timestamp).toLocaleString('en-IN')}
+                  </p>
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                    log.call_type === 'Connected'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  {log.call_type}
+                </span>
               </div>
-          ))}
-          {callLogs.length === 0 && <p className="text-center text-slate-500 mt-4">No call logs yet.</p>}
-       </div>
+            );
+          })}
+          {callLogs.length === 0 && (
+            <p className="text-center text-slate-400 text-xs py-4">No recent calling activities recorded.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

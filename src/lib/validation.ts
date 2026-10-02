@@ -1,46 +1,50 @@
 import { z } from 'zod';
 
+// Helper to convert comma separated string to clean string array
+export const parseSkills = (val: string | string[]): string[] => {
+  if (Array.isArray(val)) return val.map(s => s.trim()).filter(Boolean);
+  if (!val || typeof val !== 'string') return [];
+  return val.split(',').map(s => s.trim()).filter(Boolean);
+};
+
 // Phone: Indian format, 10 digits or +91 prefix
-const phoneSchema = z.string()
+export const phoneSchema = z.string()
   .min(10, 'Mobile number must be at least 10 digits')
   .max(15, 'Mobile number too long')
-  .regex(/^(\+91[\-\s]?)?[6-9]\d{9}$/, 'Enter valid Indian mobile number');
+  .regex(/^(\+91[-\s]?)?[6-9]\d{9}$/, 'Enter valid Indian mobile number');
 
-// Salary: positive number, reasonable range
-const salarySchema = z.coerce.number()
+// Salary: positive number
+export const salarySchema = z.number()
   .min(0, 'Salary cannot be negative')
   .max(10000000, 'Salary too high');
 
 // Experience: 0-50 years
-const experienceSchema = z.coerce.number()
+export const experienceSchema = z.number()
   .min(0, 'Experience cannot be negative')
   .max(50, 'Experience too high');
 
 // Urgency: 1-5
-const urgencySchema = z.coerce.number()
+export const urgencySchema = z.number()
   .min(1, 'Urgency must be 1-5')
   .max(5, 'Urgency must be 1-5');
 
-// Skills: comma-separated, non-empty after split
-const skillsSchema = z.string()
-  .transform(val => val.split(',').map(s => s.trim()).filter(Boolean))
-  .refine(arr => arr.length > 0, 'At least one skill required');
+// ISO datetime string for scheduling
+export const datetimeSchema = z.string().min(1, 'Date & time required');
 
-// ISO datetime string for interview scheduling
-const datetimeSchema = z.string()
-  .datetime({ offset: true })
-  .refine(val => new Date(val) > new Date(), 'Interview must be in the future');
-
+// Candidate Form Schema
 export const candidateSchema = z.object({
   name: z.string().min(2, 'Name too short').max(100, 'Name too long'),
   mobile: phoneSchema,
   experience: experienceSchema,
-  skills: skillsSchema,
+  skills: z.string().min(1, 'At least one skill required'),
   location: z.string().min(1, 'Location required').max(100, 'Location too long'),
   expected_salary: salarySchema,
   last_role: z.string().min(1, 'Last role required').max(100, 'Last role too long'),
+  email: z.string().email('Invalid email').optional().or(z.literal('')),
+  notes: z.string().max(1000, 'Notes too long').optional(),
 });
 
+// Job Form Schema
 export const jobSchema = z.object({
   company_name: z.string().min(1, 'Company required').max(100, 'Company name too long'),
   role: z.string().min(1, 'Role required').max(100, 'Role too long'),
@@ -49,8 +53,9 @@ export const jobSchema = z.object({
   max_exp: experienceSchema,
   salary_min: salarySchema,
   salary_max: salarySchema,
-  skills_req: skillsSchema,
+  skills_req: z.string().min(1, 'Required skills are required'),
   urgency: urgencySchema,
+  employer_id: z.string().optional(),
 }).refine(data => data.min_exp <= data.max_exp, {
   message: 'Min experience cannot exceed max experience',
   path: ['max_exp'],
@@ -59,17 +64,77 @@ export const jobSchema = z.object({
   path: ['salary_max'],
 });
 
+// Interview Form Schema
 export const interviewSchema = z.object({
-  candidate_id: z.string().uuid('Invalid candidate'),
-  job_id: z.string().uuid('Invalid job'),
+  candidate_id: z.string().min(1, 'Candidate required'),
+  job_id: z.string().min(1, 'Job required'),
   scheduled_time: datetimeSchema,
+  notes: z.string().max(500, 'Notes too long').optional(),
 });
 
+// Call Log Schema
 export const callLogSchema = z.object({
-  candidate_id: z.string().uuid('Invalid candidate'),
+  candidate_id: z.string().min(1, 'Candidate required'),
   call_type: z.enum(['Connected', 'Busy', 'SwitchOff']),
   duration: z.coerce.number().min(0).default(0),
   note: z.string().max(500, 'Note too long').optional(),
+});
+
+// Employer Form Schema
+export const employerSchema = z.object({
+  company_name: z.string().min(2, 'Company name required').max(150),
+  contact_person: z.string().min(2, 'Contact person required').max(100),
+  phone: phoneSchema,
+  email: z.string().email('Invalid email').optional().or(z.literal('')),
+  location: z.string().min(2, 'City/Location required').max(100),
+  industry: z.string().max(100).optional().or(z.literal('')),
+  address: z.string().max(250).optional().or(z.literal('')),
+  notes: z.string().max(1000).optional().or(z.literal('')),
+});
+
+// Application Form Schema
+export const applicationSchema = z.object({
+  candidate_id: z.string().min(1, 'Candidate required'),
+  job_id: z.string().min(1, 'Job required'),
+  stage: z.enum([
+    'Applied',
+    'Screening',
+    'Shortlisted',
+    'Employer Submitted',
+    'Interview Scheduled',
+    'Interview Completed',
+    'Selected',
+    'Offer',
+    'Joined',
+    'Placed',
+    'Rejected',
+    'Withdrawn',
+    'On Hold'
+  ]),
+  notes: z.string().max(1000).optional().or(z.literal('')),
+  offered_salary: salarySchema.optional(),
+  joining_date: z.string().optional().or(z.literal('')),
+});
+
+// Task / Follow-up Schema
+export const taskSchema = z.object({
+  title: z.string().min(3, 'Title required').max(150),
+  due_date: z.string().min(1, 'Due date required'),
+  entity_type: z.enum(['candidate', 'employer', 'application']),
+  entity_id: z.string().min(1, 'Linked entity required'),
+  priority: z.enum(['Low', 'Medium', 'High']).default('Medium'),
+  notes: z.string().max(500).optional().or(z.literal('')),
+});
+
+// Payment Form Schema
+export const paymentSchema = z.object({
+  type: z.enum(['Candidate_Registration', 'Employer_Placement', 'Other']),
+  amount: z.coerce.number().positive('Amount must be greater than zero'),
+  payment_method: z.enum(['UPI', 'Cash', 'Bank_Transfer', 'Cheque']),
+  candidate_id: z.string().optional().or(z.literal('')),
+  employer_id: z.string().optional().or(z.literal('')),
+  reference_no: z.string().max(100).optional().or(z.literal('')),
+  notes: z.string().max(500).optional().or(z.literal('')),
 });
 
 // Type inference
@@ -77,3 +142,7 @@ export type CandidateInput = z.infer<typeof candidateSchema>;
 export type JobInput = z.infer<typeof jobSchema>;
 export type InterviewInput = z.infer<typeof interviewSchema>;
 export type CallLogInput = z.infer<typeof callLogSchema>;
+export type EmployerInput = z.infer<typeof employerSchema>;
+export type ApplicationInput = z.infer<typeof applicationSchema>;
+export type TaskInput = z.infer<typeof taskSchema>;
+export type PaymentInput = z.infer<typeof paymentSchema>;
