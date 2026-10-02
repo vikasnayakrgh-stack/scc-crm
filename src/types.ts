@@ -152,3 +152,16 @@ export interface PaymentRecord {
 export type UserRole = 'Admin' | 'Telecaller-1' | 'Telecaller-2';
 
 export const USERS: UserRole[] = ['Admin', 'Telecaller-1', 'Telecaller-2'];
+
+export type AppRole = 'admin' | 'manager' | 'recruiter';
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  display_name: string;
+  role: AppRole;
+  phone?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string;
+}

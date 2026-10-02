@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { HashRouter, Routes, Route, NavLink } from 'react-router-dom';
 import { DataProvider, useData } from './context/DataContext';
+import { AuthProvider } from './context/AuthContext';
 import { UserProvider, useUser } from './context/UserContext';
 import { USERS } from './types';
 import Dashboard from './screens/Dashboard';
@@ -193,13 +194,15 @@ const NavItem = ({ to, icon: Icon, label }: any) => (
 export default function App() {
   return (
     <ErrorBoundary>
-      <UserProvider>
-        <DataProvider>
-          <HashRouter>
-            <AppContent />
-          </HashRouter>
-        </DataProvider>
-      </UserProvider>
+      <AuthProvider>
+        <UserProvider>
+          <DataProvider>
+            <HashRouter>
+              <AppContent />
+            </HashRouter>
+          </DataProvider>
+        </UserProvider>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }
