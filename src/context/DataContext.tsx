@@ -127,27 +127,55 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [updateQueueStatus]);
 
-  // Execute a single queued mutation against Supabase
+  // Execute a single queued mutation against Supabase with idempotency and OCC
   const executeRemoteMutation = useCallback(async (mutation: QueuedMutation) => {
     if (!isSupabaseConfigured) {
       return { error: null }; // In mock/local mode, consider synced locally
     }
 
+    const entityId = mutation.entityId || mutation.data?.id;
+
     if (mutation.type === 'insert') {
-      return await supabase.from(mutation.table).insert(mutation.data);
+      // Idempotent insert: use upsert with onConflict on primary key 'id' and ignoreDuplicates: true
+      return await supabase
+        .from(mutation.table)
+        .upsert(mutation.data, { onConflict: 'id', ignoreDuplicates: true });
     } else if (mutation.type === 'update') {
-      return await supabase.from(mutation.table).update(mutation.data).eq('id', mutation.data.id);
+      // Optimistic concurrency control (OCC): check expectedUpdatedAt if present
+      let query = supabase.from(mutation.table).update(mutation.data).eq('id', entityId);
+      if (mutation.expectedUpdatedAt) {
+        query = query.eq('updated_at', mutation.expectedUpdatedAt);
+      }
+      const res = await query.select();
+      if (!res.error && res.data && res.data.length === 0 && mutation.expectedUpdatedAt) {
+        return {
+          error: {
+            code: 'CONCURRENCY_CONFLICT',
+            message: 'Conflict: Record was modified remotely while offline. Saved to dead letter queue for review.',
+          },
+        };
+      }
+      return res;
     } else if (mutation.type === 'delete') {
-      return await supabase.from(mutation.table).delete().eq('id', mutation.data.id);
+      return await supabase.from(mutation.table).delete().eq('id', entityId);
     }
     return { error: new Error('Unknown mutation type') };
   }, []);
 
-  // Process offline queue with backoff and DLQ
+  // Process offline queue with backoff, session guard, and DLQ
   const syncNow = useCallback(async () => {
     if (!navigator.onLine) {
       toast.error('Cannot sync while offline');
       return;
+    }
+
+    // Session freshness check: pause sync if session expired or unauthenticated
+    if (isSupabaseConfigured) {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        console.warn('Sync paused: No active Supabase session. Will resume once authenticated.');
+        return;
+      }
     }
 
     const result = await processOfflineQueue(executeRemoteMutation);
@@ -221,7 +249,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { data: fullRecord, error: null };
     }
 
-    const result = await supabase.from(table).insert(fullRecord).select().single();
+    const result = await supabase
+      .from(table)
+      .upsert(fullRecord, { onConflict: 'id', ignoreDuplicates: true })
+      .select()
+      .single();
     if (result.error) {
       // Throw error so calling screen DOES NOT show false-success toast!
       throw new Error(result.error.message || `Failed to insert into ${table}`);

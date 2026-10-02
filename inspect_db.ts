@@ -1,7 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = 'https://chqxlalplhhypnfnipom.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoZXhsYWxwbGhoeXBuZm5pcG9tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY3MzYyMDMsImV4cCI6MjA2MjMxMjIwM30.vUqJGqZxJvZ8sV7QkP8gJq8rJq8rJq8rJq8rJq8rJq8';
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://zshihpvmtvwsbwrjpugy.supabase.co';
+const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || '';
+
+if (!SUPABASE_ANON_KEY) {
+  console.error('Error: VITE_SUPABASE_ANON_KEY environment variable is required to inspect database.');
+  process.exit(1);
+}
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 

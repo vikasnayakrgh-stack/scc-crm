@@ -1,8 +1,10 @@
 export interface QueuedMutation {
   id: string;
+  entityId?: string;
   table: string;
   type: 'insert' | 'update' | 'delete';
   data: any;
+  expectedUpdatedAt?: string;
   timestamp: number;
   retryCount: number;
   lastAttemptAt?: number;
@@ -46,18 +48,24 @@ export const getOfflineDb = (): Promise<IDBDatabase> => {
   });
 };
 
-// Add mutation to offline queue
+// Add mutation to offline queue with unique mutation id and OCC token
 export const enqueueMutation = async (
   table: string,
   type: 'insert' | 'update' | 'delete',
-  data: any
+  data: any,
+  options?: { expectedUpdatedAt?: string }
 ): Promise<QueuedMutation> => {
   const db = await getOfflineDb();
+  const entityId = data?.id || crypto.randomUUID();
+  // Ensure mutation id is unique per operation while preserving entityId
+  const mutationId = data?._mutationId || data?.id || crypto.randomUUID();
   const mutation: QueuedMutation = {
-    id: data.id || crypto.randomUUID(),
+    id: mutationId,
+    entityId,
     table,
     type,
-    data: { ...data, id: data.id || crypto.randomUUID() },
+    data: { ...data, id: entityId },
+    expectedUpdatedAt: options?.expectedUpdatedAt || data?.updated_at,
     timestamp: Date.now(),
     retryCount: 0,
     status: 'pending',
@@ -195,14 +203,29 @@ export const getQueueMetrics = async (): Promise<{ pending: number; deadLetter: 
 
       let pending = 0;
       let deadLetter = 0;
+      let completed = 0;
+
+      const checkDone = () => {
+        completed += 1;
+        if (completed === 2) {
+          resolve({ pending, deadLetter });
+        }
+      };
 
       const qReq = qStore.count();
-      qReq.onsuccess = () => { pending = qReq.result; };
+      qReq.onsuccess = () => {
+        pending = qReq.result;
+        checkDone();
+      };
+      qReq.onerror = () => checkDone();
 
       const dlqReq = dlqStore.count();
-      dlqReq.onsuccess = () => { deadLetter = dlqReq.result; };
+      dlqReq.onsuccess = () => {
+        deadLetter = dlqReq.result;
+        checkDone();
+      };
+      dlqReq.onerror = () => checkDone();
 
-      tx.oncomplete = () => resolve({ pending, deadLetter });
       tx.onerror = () => resolve({ pending: 0, deadLetter: 0 });
     });
   } catch {
@@ -210,13 +233,30 @@ export const getQueueMetrics = async (): Promise<{ pending: number; deadLetter: 
   }
 };
 
-// Check if an error is permanent (constraint, schema, or authorization error)
+// Check if an error is permanent (constraint, schema, concurrency, or authorization error)
 export const isPermanentError = (error: any): boolean => {
   if (!error) return false;
   const code = String(error.code || '');
   const msg = String(error.message || '').toLowerCase();
 
+  // Explicit transient authentication / network failures: NEVER permanent
+  if (
+    code === 'AUTH_EXPIRED' ||
+    code === 'SESSION_EXPIRED' ||
+    msg.includes('jwt expired') ||
+    msg.includes('session expired') ||
+    msg.includes('network') ||
+    msg.includes('timeout') ||
+    msg.includes('fetch failed')
+  ) {
+    return false;
+  }
+
+  // Concurrency conflict (OCC): permanent conflict that requires manual resolution
+  if (code === 'CONCURRENCY_CONFLICT' || msg.includes('conflict')) return true;
+
   // PostgreSQL unique violation: 23505, foreign key violation: 23503, not null: 23502
+  // Genuine RLS permission denied: 42501 (when session is active)
   if (code.startsWith('23') || code === '42501' || code === 'PGRST') return true;
   if (msg.includes('duplicate') || msg.includes('violates') || msg.includes('permission denied')) return true;
   return false;
