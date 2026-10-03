@@ -13,7 +13,7 @@
 ALTER TABLE public.candidates
   ADD COLUMN IF NOT EXISTS qualification text,
   ADD COLUMN IF NOT EXISTS notice_period text,
-  ADD COLUMN IF NOT EXISTS current_salary integer DEFAULT 0 CHECK (current_salary >= 0),
+  ADD COLUMN IF NOT EXISTS current_salary integer DEFAULT NULL CHECK (current_salary >= 0),
   ADD COLUMN IF NOT EXISTS source text;
 
 -- 2. Indexes for search and reporting performance
