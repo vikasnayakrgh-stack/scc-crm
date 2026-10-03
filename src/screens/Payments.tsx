@@ -131,149 +131,155 @@ export default function Payments() {
   };
 
   return (
-    <div className="pb-20 p-4 max-w-2xl mx-auto space-y-4">
-      <div className="flex justify-between items-center sticky top-0 bg-[#f1f5f9] z-10 py-2">
+    <div className="pb-20 space-y-4 max-w-6xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sticky top-16 bg-[#f8fafc]/95 backdrop-blur-xs z-10 py-2.5 border-b border-slate-200/60">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Financials & Payments ({filteredPayments.length})</h1>
-          <p className="text-xs text-slate-500">Registration fees, client invoices & collections</p>
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            Financials & Payments
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+              {filteredPayments.length}
+            </span>
+          </h1>
+          <p className="text-xs text-slate-500">Registration fees, client placement billing & collection records</p>
         </div>
-        <Button onClick={() => setIsAddOpen(true)} className="flex items-center gap-1 text-xs py-1.5 px-3">
-          <Plus size={14} /> Record Entry
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Filter Tabs */}
+          <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200/80 text-xs">
+            {(['All', 'Registration', 'Placement', 'Pending'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setFilter(tab)}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  filter === tab
+                    ? 'bg-white text-blue-700 shadow-xs font-semibold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+          <Button onClick={() => setIsAddOpen(true)} className="flex items-center gap-1.5 text-xs py-1.5 px-3 shadow-xs">
+            <Plus size={14} /> Record Entry
+          </Button>
+        </div>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
-          <p className="text-[10px] text-slate-400 font-bold uppercase">Total Collected</p>
-          <p className="text-lg font-bold text-emerald-700 flex items-center mt-0.5">
-            <IndianRupee size={15} />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
+          <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Total Collected</p>
+          <p className="text-xl font-bold text-emerald-600 flex items-center mt-1">
+            <IndianRupee size={16} />
             {totalCollected.toLocaleString('en-IN')}
           </p>
         </div>
-        <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
-          <p className="text-[10px] text-slate-400 font-bold uppercase">Registration Fees</p>
-          <p className="text-lg font-bold text-blue-700 flex items-center mt-0.5">
-            <IndianRupee size={15} />
+        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
+          <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Candidate Reg Fees</p>
+          <p className="text-xl font-bold text-blue-600 flex items-center mt-1">
+            <IndianRupee size={16} />
             {regFeesTotal.toLocaleString('en-IN')}
           </p>
         </div>
-        <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
-          <p className="text-[10px] text-slate-400 font-bold uppercase">Placement Invoices</p>
-          <p className="text-lg font-bold text-purple-700 flex items-center mt-0.5">
-            <IndianRupee size={15} />
+        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
+          <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Placement Invoices</p>
+          <p className="text-xl font-bold text-indigo-600 flex items-center mt-1">
+            <IndianRupee size={16} />
             {placementFeesTotal.toLocaleString('en-IN')}
           </p>
         </div>
-        <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
-          <p className="text-[10px] text-slate-400 font-bold uppercase">Pending</p>
-          <p className="text-lg font-bold text-amber-600 flex items-center mt-0.5">
-            <IndianRupee size={15} />
+        <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
+          <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">Pending Receivables</p>
+          <p className="text-xl font-bold text-amber-600 flex items-center mt-1">
+            <IndianRupee size={16} />
             {pendingReceivables.toLocaleString('en-IN')}
           </p>
         </div>
       </div>
 
-      {/* Filter Tabs */}
-      <div className="flex gap-1 overflow-x-auto pb-1">
-        {(['All', 'Registration', 'Placement', 'Pending'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setFilter(tab)}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-              filter === tab ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200'
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
-
       {loading ? (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
           <CardSkeleton />
           <CardSkeleton />
         </div>
       ) : (
-        <div className="space-y-3">
+        <div>
           {filteredPayments.length === 0 && (
-            <div className="text-center py-10 bg-white rounded-xl border border-dashed border-slate-200 text-xs text-slate-500">
+            <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-200 text-sm text-slate-500">
               No payment transactions found in "{filter}" filter.
             </div>
           )}
 
-          {filteredPayments.map((p) => {
-            const cand = candidates.find((c) => c.id === p.candidate_id) || p.candidates;
-            const emp = employers.find((e) => e.id === p.employer_id) || p.employers;
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+            {filteredPayments.map((p) => {
+              const cand = candidates.find((c) => c.id === p.candidate_id) || p.candidates;
+              const emp = employers.find((e) => e.id === p.employer_id) || p.employers;
 
-            return (
-              <div
-                key={p.id}
-                className="bg-white p-3.5 rounded-xl shadow-sm border border-slate-100 space-y-2.5"
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-                      <Receipt size={14} className="text-slate-400" />
-                      {p.type === 'Candidate_Registration'
-                        ? `Candidate Fee: ${cand?.name || 'Walk-in'}`
-                        : `Placement Billing: ${emp?.company_name || 'Client'}`}
-                    </h3>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      Recorded by {p.recorded_by} • {new Date(p.paid_at || p.created_at).toLocaleDateString('en-IN')}
-                    </p>
+              return (
+                <div
+                  key={p.id}
+                  className="bg-white p-4.5 rounded-xl shadow-xs border border-slate-200/80 hover:border-slate-300 transition-all flex flex-col justify-between"
+                >
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-start gap-2">
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-sm flex items-center gap-1.5">
+                          <Receipt size={15} className="text-slate-400" />
+                          {p.type === 'Candidate_Registration'
+                            ? `Candidate Fee: ${cand?.name || 'Walk-in'}`
+                            : `Placement Billing: ${emp?.company_name || 'Client'}`}
+                        </h3>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Recorded by <span className="font-medium text-slate-600">{p.recorded_by}</span> • {new Date(p.paid_at || p.created_at).toLocaleDateString('en-IN')}
+                        </p>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <span className="text-base font-bold text-slate-900 flex items-center justify-end">
+                          <IndianRupee size={14} />
+                          {Number(p.amount).toLocaleString('en-IN')}
+                        </span>
+                        <Badge variant={p.status === 'Paid' ? 'success' : 'warning'}>
+                          {p.status}
+                        </Badge>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="text-right">
-                    <span className="text-base font-bold text-slate-800 flex items-center justify-end">
-                      <IndianRupee size={14} />
-                      {Number(p.amount).toLocaleString('en-IN')}
-                    </span>
-                    <Badge
-                      color={
-                        p.status === 'Paid'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-amber-100 text-amber-800 font-semibold'
-                      }
-                    >
-                      {p.status}
-                    </Badge>
-                  </div>
-                </div>
+                  <div className="flex flex-wrap items-center justify-between text-xs pt-3 mt-3 border-t border-slate-100 text-slate-500">
+                    <div className="flex items-center gap-2">
+                      <span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-medium text-slate-700 border border-slate-200/60">
+                        {p.payment_method}
+                      </span>
+                      {p.reference_no && (
+                        <span className="text-[11px] text-slate-600 font-mono">Ref: #{p.reference_no}</span>
+                      )}
+                    </div>
 
-                <div className="flex flex-wrap items-center justify-between text-xs pt-2 border-t border-slate-100 text-slate-500">
-                  <div className="flex gap-2">
-                    <span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-medium text-slate-700">
-                      {p.payment_method}
-                    </span>
-                    {p.reference_no && (
-                      <span className="text-[11px] text-slate-600">Ref: #{p.reference_no}</span>
+                    {p.status === 'Pending' && (
+                      isAdminOrManager ? (
+                        <button
+                          onClick={() => markPaymentReceived(p.id)}
+                          className="text-xs px-2.5 py-1 bg-emerald-50 text-emerald-700 font-semibold rounded-lg hover:bg-emerald-100 transition-colors flex items-center gap-1 border border-emerald-200 shadow-2xs"
+                        >
+                          <CheckCircle2 size={13} /> Mark Received
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded font-medium border border-amber-200">
+                          Pending Admin Clearance
+                        </span>
+                      )
                     )}
                   </div>
-
-                  {p.status === 'Pending' && (
-                    isAdminOrManager ? (
-                      <button
-                        onClick={() => markPaymentReceived(p.id)}
-                        className="text-xs px-2.5 py-1 bg-emerald-50 text-emerald-700 font-semibold rounded hover:bg-emerald-100 flex items-center gap-1"
-                      >
-                        <CheckCircle2 size={13} /> Mark Received
-                      </button>
-                    ) : (
-                      <span className="text-[11px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded font-medium">
-                        Pending Admin Clearance
-                      </span>
-                    )
-                  )}
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
       {/* Record Payment Modal */}
-      <Modal isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} title="Record Payment / Billing Entry">
+      <Modal isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} title="Record Payment / Billing Entry" maxWidth="lg">
         <form onSubmit={handleRecordPayment} className="space-y-3">
           <div>
             <Label>Payment Type</Label>

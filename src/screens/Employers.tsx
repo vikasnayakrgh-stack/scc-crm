@@ -120,10 +120,10 @@ export default function Employers() {
   };
 
   return (
-    <div className="pb-20 p-4 max-w-2xl mx-auto">
-      <div className="flex justify-between items-center mb-3 sticky top-0 bg-[#f1f5f9] z-10 py-2">
+    <div className="space-y-4 max-w-6xl mx-auto">
+      <div className="flex justify-between items-center mb-3 sticky top-16 bg-[#f8fafc]/95 backdrop-blur-xs z-10 py-2">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Employers & Clients ({filteredEmployers.length})</h1>
+          <h1 className="text-xl font-bold text-slate-800 tracking-tight">Employers & Clients ({filteredEmployers.length})</h1>
           <p className="text-xs text-slate-500">Corporate partners & hiring accounts</p>
         </div>
         <Button
@@ -131,7 +131,7 @@ export default function Employers() {
             addForm.reset();
             setIsAddOpen(true);
           }}
-          className="flex items-center gap-1 text-xs py-1.5 px-3"
+          className="flex items-center gap-1.5 text-xs py-1.5 px-3"
         >
           <Plus size={14} /> Add Client
         </Button>
@@ -144,22 +144,24 @@ export default function Employers() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by company, HR contact, phone or city..."
-          className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-lg shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
 
       {loading ? (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
           <CardSkeleton />
           <CardSkeleton />
         </div>
       ) : (
-        <div className="space-y-3">
+        <div>
           {filteredEmployers.length === 0 && (
             <div className="text-center py-10 bg-white rounded-xl border border-dashed border-slate-200 text-xs text-slate-500">
               No employers found. Add a hiring company to link vacancies.
             </div>
           )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
 
           {filteredEmployers.map((emp) => {
             const activeJobs = jobs.filter((j) => j.employer_id === emp.id || j.company_name === emp.company_name);
@@ -225,11 +227,12 @@ export default function Employers() {
               </div>
             );
           })}
+          </div>
         </div>
       )}
 
       {/* Add Employer Modal */}
-      <Modal isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} title="Register Employer / Client">
+      <Modal isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} title="Register Employer / Client" maxWidth="lg">
         <form onSubmit={addForm.handleSubmit(onSubmitAddEmployer)} className="space-y-3">
           <div>
             <Label>Company Name</Label>
@@ -320,6 +323,7 @@ export default function Employers() {
           setEditingEmployer(null);
         }}
         title={`Edit Employer: ${editingEmployer?.company_name || ''}`}
+        maxWidth="lg"
       >
         <form onSubmit={editForm.handleSubmit(onSubmitEditEmployer)} className="space-y-3">
           <div>

@@ -137,130 +137,144 @@ export default function Jobs() {
   };
 
   return (
-    <div className="pb-20 p-4 max-w-2xl mx-auto">
-      <div className="flex justify-between items-center mb-3 sticky top-0 bg-[#f1f5f9] z-10 py-2">
+    <div className="pb-20 space-y-4 max-w-6xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sticky top-16 bg-[#f8fafc]/95 backdrop-blur-xs z-10 py-2.5 border-b border-slate-200/60">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Job Openings ({filteredJobs.length})</h1>
-          <p className="text-xs text-slate-500">Employer mandates and vacancies</p>
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            Job Openings
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+              {filteredJobs.length}
+            </span>
+          </h1>
+          <p className="text-xs text-slate-500">Employer mandates and open job vacancies</p>
         </div>
-        <Button
-          onClick={() => {
-            addForm.reset();
-            setIsAddOpen(true);
-          }}
-          className="flex items-center gap-1 text-xs py-1.5 px-3"
-        >
-          <Plus size={14} /> Add Job
-        </Button>
-      </div>
-
-      {/* Filter tabs */}
-      <div className="flex gap-1 mb-3">
-        {(['All', 'Open', 'Closed'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setFilter(tab)}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-              filter === tab ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200'
-            }`}
+        <div className="flex items-center gap-2">
+          {/* Filter tabs */}
+          <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200/80 text-xs">
+            {(['All', 'Open', 'Closed'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setFilter(tab)}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  filter === tab
+                    ? 'bg-white text-blue-700 shadow-xs font-semibold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+          <Button
+            onClick={() => {
+              addForm.reset();
+              setIsAddOpen(true);
+            }}
+            className="flex items-center gap-1.5 text-xs py-1.5 px-3 shadow-xs"
           >
-            {tab}
-          </button>
-        ))}
+            <Plus size={14} /> Add Job
+          </Button>
+        </div>
       </div>
 
       {loading ? (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
           <CardSkeleton />
           <CardSkeleton />
         </div>
       ) : (
-        <div className="space-y-3">
+        <div>
           {filteredJobs.length === 0 && (
-            <div className="text-center py-10 bg-white rounded-xl border border-dashed border-slate-200 text-xs text-slate-500">
-              No {filter !== 'All' ? filter.toLowerCase() : ''} jobs found.
+            <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-200 text-sm text-slate-500">
+              No {filter !== 'All' ? filter.toLowerCase() : ''} job openings found.
             </div>
           )}
 
-          {filteredJobs.map((j) => (
-            <div
-              key={j.id}
-              className={`bg-white p-4 rounded-xl shadow-sm border ${
-                j.status === 'Closed' ? 'border-slate-200 opacity-75' : 'border-slate-100'
-              }`}
-            >
-              <div className="flex justify-between items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+            {filteredJobs.map((j) => (
+              <div
+                key={j.id}
+                className={`bg-white p-4.5 rounded-xl shadow-xs border transition-all flex flex-col justify-between ${
+                  j.status === 'Closed' ? 'border-slate-200 bg-slate-50/50 opacity-80' : 'border-slate-200/80 hover:border-slate-300'
+                }`}
+              >
                 <div>
-                  <h3 className="font-bold text-slate-800 text-base">{j.role}</h3>
-                  <p className="text-xs font-semibold text-blue-700">{j.company_name}</p>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <Badge color={j.urgency >= 4 ? 'bg-red-100 text-red-700 font-bold' : 'bg-blue-50 text-blue-700'}>
-                    {j.urgency >= 4 ? 'Urgent' : 'Normal'}
-                  </Badge>
-                  <Badge color={j.status === 'Open' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}>
-                    {j.status}
-                  </Badge>
-                </div>
-              </div>
+                  <div className="flex justify-between items-start gap-2">
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-base">{j.role}</h3>
+                      <p className="text-xs font-semibold text-blue-600">{j.company_name}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <Badge variant={j.urgency >= 4 ? 'danger' : 'info'}>
+                        {j.urgency >= 4 ? 'Urgent' : 'Normal'}
+                      </Badge>
+                      <Badge variant={j.status === 'Open' ? 'success' : 'neutral'}>
+                        {j.status}
+                      </Badge>
+                    </div>
+                  </div>
 
-              <div className="flex flex-wrap gap-3 text-xs text-slate-500 mt-2.5">
-                <span className="flex items-center gap-1">
-                  <MapPin size={13} className="text-slate-400" /> {j.location}
-                </span>
-                <span className="flex items-center gap-1">
-                  <Clock size={13} className="text-slate-400" /> {j.min_exp}-{j.max_exp} Yrs Exp
-                </span>
-                <span className="flex items-center gap-1 font-semibold text-slate-700">
-                  <IndianRupee size={13} className="text-slate-400" />
-                  {j.salary_min?.toLocaleString('en-IN')} - {j.salary_max?.toLocaleString('en-IN')} / mo
-                </span>
-              </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-slate-600 mt-3">
+                    <span className="flex items-center gap-1">
+                      <MapPin size={13} className="text-slate-400" /> {j.location}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Clock size={13} className="text-slate-400" /> {j.min_exp}-{j.max_exp} Yrs Exp
+                    </span>
+                    <span className="flex items-center gap-1 font-semibold text-slate-800">
+                      <IndianRupee size={13} className="text-slate-400" />
+                      {j.salary_min?.toLocaleString('en-IN')} - {j.salary_max?.toLocaleString('en-IN')} / mo
+                    </span>
+                  </div>
 
-              {/* Skills */}
-              <div className="flex flex-wrap gap-1 mt-3">
-                {(j.skills_req || []).map((skill, idx) => (
-                  <span
-                    key={idx}
-                    className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium"
-                  >
-                    {skill}
+                  {/* Skills */}
+                  {(j.skills_req && j.skills_req.length > 0) && (
+                    <div className="flex flex-wrap gap-1 mt-3">
+                      {j.skills_req.map((skill, idx) => (
+                        <span
+                          key={idx}
+                          className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-medium border border-slate-200/50"
+                        >
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Action bar */}
+                <div className="mt-4 pt-3 border-t border-slate-100 flex justify-between items-center text-xs">
+                  <span className="text-[11px] text-slate-400">
+                    Added {new Date(j.created_at).toLocaleDateString('en-IN')}
                   </span>
-                ))}
-              </div>
-
-              {/* Action bar */}
-              <div className="mt-3 pt-2.5 border-t border-slate-100 flex justify-between items-center text-xs">
-                <span className="text-[11px] text-slate-400">
-                  Added on {new Date(j.created_at).toLocaleDateString('en-IN')}
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleOpenEdit(j)}
-                    className="text-xs px-2.5 py-1 rounded font-medium border border-slate-200 text-slate-700 hover:bg-slate-100 flex items-center gap-1"
-                    title="Edit Job"
-                  >
-                    <Pencil size={13} /> Edit
-                  </button>
-                  <button
-                    onClick={() => toggleJobStatus(j.id, j.status)}
-                    className={`text-xs px-2.5 py-1 rounded font-medium border ${
-                      j.status === 'Open'
-                        ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                        : 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
-                    }`}
-                  >
-                    {j.status === 'Open' ? 'Close Job' : 'Reopen Job'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleOpenEdit(j)}
+                      className="text-xs px-2.5 py-1 rounded-lg font-medium border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1 shadow-2xs"
+                      title="Edit Job"
+                    >
+                      <Pencil size={13} /> Edit
+                    </button>
+                    <button
+                      onClick={() => toggleJobStatus(j.id, j.status)}
+                      className={`text-xs px-2.5 py-1 rounded-lg font-medium border transition-colors shadow-2xs ${
+                        j.status === 'Open'
+                          ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                          : 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                      }`}
+                    >
+                      {j.status === 'Open' ? 'Close Job' : 'Reopen Job'}
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
 
       {/* Add Job Modal */}
-      <Modal isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} title="Create Job Opening">
+      <Modal isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} title="Create Job Opening" maxWidth="lg">
         <form onSubmit={addForm.handleSubmit(onSubmitAddJob)} className="space-y-3">
           <div>
             <Label>Employer / Company Name</Label>
@@ -393,6 +407,7 @@ export default function Jobs() {
           setEditingJob(null);
         }}
         title={`Edit Job Opening: ${editingJob?.role || ''}`}
+        maxWidth="lg"
       >
         <form onSubmit={editForm.handleSubmit(onSubmitEditJob)} className="space-y-3">
           <div>

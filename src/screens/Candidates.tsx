@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { useUser } from '../context/UserContext';
 import { Button, Input, Modal, Label, Badge, CardSkeleton } from '../components/ui';
-import { Phone, MessageCircle, Calendar, UserPlus, Search, Pencil } from 'lucide-react';
+import { Phone, MessageCircle, Calendar, UserPlus, Search, Pencil, Upload } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { Candidate } from '../types';
 import { useForm } from 'react-hook-form';
@@ -17,6 +17,7 @@ import {
 } from '../lib/validation';
 import { calculateCandidateJobMatch } from '../lib/matching';
 import { scheduleInterviewWithApplication } from '../lib/pipelineHelpers';
+import { CandidateImportModal } from '../components/CandidateImportModal';
 
 export default function Candidates() {
   const { candidates, jobs, applications, loading, insert, update } = useData();
@@ -25,6 +26,7 @@ export default function Candidates() {
   const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Placed' | 'Blacklisted'>('All');
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [editingCandidate, setEditingCandidate] = useState<Candidate | null>(null);
 
@@ -43,6 +45,14 @@ export default function Candidates() {
   const [editCustomNotice, setEditCustomNotice] = useState('');
   const [editSourceSelect, setEditSourceSelect] = useState('');
   const [editCustomSource, setEditCustomSource] = useState('');
+
+  // Auto-open import modal if requested via hash param (e.g. for previewing / verification)
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash.includes('importStep=')) {
+      setIsImportOpen(true);
+    }
+  }, []);
 
   const addForm = useForm<CandidateInput>({
     resolver: zodResolver(candidateSchema),
@@ -284,29 +294,43 @@ export default function Candidates() {
   };
 
   return (
-    <div className="pb-20 p-4 max-w-2xl mx-auto">
+    <div className="space-y-4 max-w-6xl mx-auto">
       {/* Header & Search */}
-      <div className="sticky top-0 bg-[#f1f5f9] pt-2 pb-3 z-10 space-y-3">
-        <div className="flex justify-between items-center">
+      <div className="sticky top-16 bg-[#f8fafc]/95 backdrop-blur-xs pt-2 pb-3 z-10 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-bold text-slate-800">Candidates ({filteredCandidates.length})</h1>
+            <h1 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
+              Candidates
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                {filteredCandidates.length}
+              </span>
+            </h1>
             <p className="text-xs text-slate-500">Candidate pool & matching</p>
           </div>
-          <Button
-            onClick={() => {
-              addForm.reset();
-              setAddQualSelect('');
-              setAddCustomQual('');
-              setAddNoticeSelect('');
-              setAddCustomNotice('');
-              setAddSourceSelect('');
-              setAddCustomSource('');
-              setIsAddOpen(true);
-            }}
-            className="flex items-center gap-1 text-xs py-1.5 px-3"
-          >
-            <UserPlus size={14} /> New Candidate
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsImportOpen(true)}
+              className="flex items-center gap-1.5 text-xs py-1.5 px-3 shadow-2xs"
+            >
+              <Upload size={14} className="text-blue-600" /> Import Candidates
+            </Button>
+            <Button
+              onClick={() => {
+                addForm.reset();
+                setAddQualSelect('');
+                setAddCustomQual('');
+                setAddNoticeSelect('');
+                setAddCustomNotice('');
+                setAddSourceSelect('');
+                setAddCustomSource('');
+                setIsAddOpen(true);
+              }}
+              className="flex items-center gap-1.5 text-xs py-1.5 px-3 shadow-xs"
+            >
+              <UserPlus size={14} /> New Candidate
+            </Button>
+          </div>
         </div>
 
         <div className="relative">
@@ -316,7 +340,7 @@ export default function Candidates() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by name, phone, skill, role, qualification, or city..."
-            className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-lg shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
 
@@ -329,7 +353,7 @@ export default function Candidates() {
               className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
                 statusFilter === tab
                   ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-white text-slate-600 border border-slate-200'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
               }`}
             >
               {tab}
@@ -340,18 +364,19 @@ export default function Candidates() {
 
       {/* Candidate List */}
       {loading ? (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
           <CardSkeleton />
           <CardSkeleton />
         </div>
       ) : (
-        <div className="space-y-3 mt-2">
+        <div>
           {filteredCandidates.length === 0 && (
             <div className="text-center py-10 bg-white rounded-xl border border-dashed border-slate-200 text-xs text-slate-500">
               No candidates found matching your search.
             </div>
           )}
 
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
           {filteredCandidates.map((c) => (
             <div
               key={c.id}
@@ -463,11 +488,12 @@ export default function Candidates() {
               </div>
             </div>
           ))}
+          </div>
         </div>
       )}
 
       {/* Add Candidate Modal */}
-      <Modal isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} title="Add New Candidate">
+      <Modal isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} title="Add New Candidate" maxWidth="lg">
         <form onSubmit={addForm.handleSubmit(onSubmitAddCandidate)} className="space-y-3">
           <div>
             <Label>Full Name</Label>
@@ -657,6 +683,7 @@ export default function Candidates() {
           setEditingCandidate(null);
         }}
         title={`Edit Candidate: ${editingCandidate?.name || ''}`}
+        maxWidth="lg"
       >
         <form onSubmit={editForm.handleSubmit(onSubmitEditCandidate)} className="space-y-3">
           <div>
@@ -874,6 +901,7 @@ export default function Candidates() {
         isOpen={!!selectedCandidate}
         onClose={() => setSelectedCandidate(null)}
         title={`Matching Jobs: ${selectedCandidate?.name}`}
+        maxWidth="lg"
       >
         <div className="space-y-3">
           <p className="text-xs text-slate-500">
@@ -951,6 +979,12 @@ export default function Candidates() {
           </div>
         </div>
       </Modal>
+
+      {/* Bulk Candidate Import Modal */}
+      <CandidateImportModal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+      />
     </div>
   );
 }

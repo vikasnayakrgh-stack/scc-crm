@@ -139,27 +139,34 @@ export default function Applications() {
   };
 
   return (
-    <div className="pb-20 p-4 max-w-2xl mx-auto">
-      <div className="flex justify-between items-center mb-3 sticky top-0 bg-[#f1f5f9] z-10 py-2">
+    <div className="pb-20 space-y-4 max-w-6xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sticky top-16 bg-[#f8fafc]/95 backdrop-blur-xs z-10 py-2.5 border-b border-slate-200/60">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Recruitment Pipeline ({filteredApps.length})</h1>
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            Recruitment Pipeline
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+              {filteredApps.length}
+            </span>
+          </h1>
           <p className="text-xs text-slate-500">Stage tracking from submission to placement</p>
         </div>
-        <Button onClick={() => setIsNewOpen(true)} className="flex items-center gap-1 text-xs py-1.5 px-3">
-          <Plus size={14} /> Apply Candidate
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setIsNewOpen(true)} className="flex items-center gap-1.5 text-xs py-1.5 px-3 shadow-xs">
+            <Plus size={14} /> Apply Candidate
+          </Button>
+        </div>
       </div>
 
       {/* Stage scroll filters */}
-      <div className="flex gap-1 overflow-x-auto pb-2 mb-3">
+      <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
         {['All', ...STAGES].map((st) => (
           <button
             key={st}
             onClick={() => setStageFilter(st)}
-            className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+            className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
               stageFilter === st
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'bg-white text-slate-600 border border-slate-200'
+                ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                : 'bg-white text-slate-600 border border-slate-200/80 hover:bg-slate-50'
             }`}
           >
             {st}
@@ -168,83 +175,89 @@ export default function Applications() {
       </div>
 
       {loading ? (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
           <CardSkeleton />
           <CardSkeleton />
         </div>
       ) : (
-        <div className="space-y-3">
+        <div>
           {filteredApps.length === 0 && (
-            <div className="text-center py-10 bg-white rounded-xl border border-dashed border-slate-200 text-xs text-slate-500">
+            <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-200 text-sm text-slate-500">
               No applications in {stageFilter === 'All' ? 'the pipeline' : `"${stageFilter}" stage`}.
             </div>
           )}
 
-          {filteredApps.map((app) => {
-            const cand = candidates.find((c) => c.id === app.candidate_id) || app.candidates;
-            const job = jobs.find((j) => j.id === app.job_id) || app.jobs;
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+            {filteredApps.map((app) => {
+              const cand = candidates.find((c) => c.id === app.candidate_id) || app.candidates;
+              const job = jobs.find((j) => j.id === app.job_id) || app.jobs;
 
-            return (
-              <div
-                key={app.id}
-                className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 space-y-3"
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-                      <User size={14} className="text-slate-400" />
-                      {cand?.name || 'Candidate'}
-                    </h3>
-                    <p className="text-xs text-slate-600 flex items-center gap-1 mt-0.5">
-                      <Briefcase size={12} className="text-slate-400" />
-                      {job?.role} @ <span className="font-semibold text-slate-700">{job?.company_name}</span>
-                    </p>
+              return (
+                <div
+                  key={app.id}
+                  className="bg-white p-4.5 rounded-xl shadow-xs border border-slate-200/80 hover:border-slate-300 transition-all flex flex-col justify-between"
+                >
+                  <div className="space-y-2.5">
+                    <div className="flex justify-between items-start gap-2">
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-base flex items-center gap-1.5">
+                          <User size={15} className="text-slate-400" />
+                          {cand?.name || 'Candidate'}
+                        </h3>
+                        <p className="text-xs text-slate-600 flex items-center gap-1 mt-0.5">
+                          <Briefcase size={12} className="text-slate-400" />
+                          {job?.role} @ <span className="font-semibold text-slate-800">{job?.company_name}</span>
+                        </p>
+                      </div>
+                      <Badge variant={app.stage === 'Placed' || app.stage === 'Joined' ? 'success' : app.stage === 'Rejected' || app.stage === 'Withdrawn' ? 'danger' : app.stage === 'On Hold' ? 'warning' : 'info'}>
+                        {app.stage}
+                      </Badge>
+                    </div>
+
+                    {app.notes && (
+                      <p className="text-xs bg-slate-50 p-2.5 rounded-lg text-slate-600 italic border border-slate-100">
+                        "{app.notes}"
+                      </p>
+                    )}
                   </div>
-                  <Badge color={getStageBadgeColor(app.stage)}>{app.stage}</Badge>
-                </div>
 
-                {app.notes && (
-                  <p className="text-xs bg-slate-50 p-2 rounded text-slate-600 italic">
-                    "{app.notes}"
-                  </p>
-                )}
+                  {/* Pipeline Transition Selector */}
+                  <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100 text-xs">
+                    <span className="text-[11px] text-slate-400">
+                      Recruiter: <strong className="text-slate-600 font-medium">{app.assigned_to || 'SCC'}</strong>
+                    </span>
 
-                {/* Pipeline Transition Selector */}
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
-                  <span className="text-[11px] text-slate-400">
-                    Recruiter: {app.assigned_to || 'SCC'}
-                  </span>
-
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] text-slate-500 font-medium">Move to:</span>
-                    <select
-                      value={app.stage}
-                      onChange={(e) => handleStageTransition(app.id, e.target.value as ApplicationStage)}
-                      className="text-xs border rounded px-2 py-1 bg-white font-medium focus:ring-1 focus:ring-blue-500"
-                    >
-                      {STAGES.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-500 font-medium">Move to:</span>
+                      <select
+                        value={app.stage}
+                        onChange={(e) => handleStageTransition(app.id, e.target.value as ApplicationStage)}
+                        className="text-xs border rounded-lg px-2 py-1 bg-white font-medium focus:ring-1 focus:ring-blue-500 border-slate-200"
+                      >
+                        {STAGES.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
       {/* New Application Modal */}
-      <Modal isOpen={isNewOpen} onClose={() => setIsNewOpen(false)} title="Apply Candidate to Job Opening">
+      <Modal isOpen={isNewOpen} onClose={() => setIsNewOpen(false)} title="Apply Candidate to Job Opening" maxWidth="lg">
         <form onSubmit={handleCreateApplication} className="space-y-3">
           <div>
             <Label>Select Candidate</Label>
             <select
               value={candidateId}
               onChange={(e) => setCandidateId(e.target.value)}
-              className="w-full text-xs border rounded-md p-2 bg-white"
+              className="w-full text-xs border rounded-lg p-2.5 bg-white border-slate-200"
               required
             >
               <option value="">Select Candidate...</option>
@@ -263,7 +276,7 @@ export default function Applications() {
             <select
               value={jobId}
               onChange={(e) => setJobId(e.target.value)}
-              className="w-full text-xs border rounded-md p-2 bg-white"
+              className="w-full text-xs border rounded-lg p-2.5 bg-white border-slate-200"
               required
             >
               <option value="">Select Job Opening...</option>
@@ -282,7 +295,7 @@ export default function Applications() {
             <select
               value={initialStage}
               onChange={(e) => setInitialStage(e.target.value as ApplicationStage)}
-              className="w-full text-xs border rounded-md p-2 bg-white"
+              className="w-full text-xs border rounded-lg p-2.5 bg-white border-slate-200"
             >
               <option value="Applied">Applied (Resume Received)</option>
               <option value="Screening">Screening (Phone Screening)</option>
@@ -300,7 +313,7 @@ export default function Applications() {
             />
           </div>
 
-          <Button type="submit" className="w-full mt-3">
+          <Button type="submit" className="w-full mt-3 shadow-xs">
             Submit Application
           </Button>
         </form>
