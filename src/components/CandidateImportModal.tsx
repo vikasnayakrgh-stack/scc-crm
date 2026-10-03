@@ -23,10 +23,12 @@ import {
   autoDetectColumnMapping,
   analyzeImportRows,
   generateSkippedReportCSV,
+  detectPlatform,
   ColumnMapping,
   ProcessedImportRow,
   CandidateImportSource,
   ImportAnalysisSummary,
+  DetectedPlatform,
 } from '../lib/candidateImport';
 
 interface CandidateImportModalProps {
@@ -43,7 +45,7 @@ export const CandidateImportModal: React.FC<CandidateImportModalProps> = ({
   onSuccess,
 }) => {
   const { candidates, insert, isOffline } = useData();
-  const { currentUser } = useUser();
+  const { currentUser, userId } = useUser();
 
   const [step, setStep] = useState<Step>('upload');
   const [file, setFile] = useState<File | null>(null);
@@ -51,8 +53,9 @@ export const CandidateImportModal: React.FC<CandidateImportModalProps> = ({
   const [rawRows, setRawRows] = useState<Record<string, any>[]>([]);
   const [source, setSource] = useState<CandidateImportSource>('WorkIndia');
   const [customSource, setCustomSource] = useState('');
-  const [defaultLocation, setDefaultLocation] = useState('Raipur');
+  const [defaultLocation, setDefaultLocation] = useState('');
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({ name: '', mobile: '' });
+  const [detectedPlatform, setDetectedPlatform] = useState<DetectedPlatform | null>(null);
   const [analysis, setAnalysis] = useState<ImportAnalysisSummary | null>(null);
   const [filterTab, setFilterTab] = useState<'all' | 'ready' | 'already_in_crm' | 'duplicate_in_file' | 'invalid'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -149,6 +152,7 @@ export const CandidateImportModal: React.FC<CandidateImportModalProps> = ({
     setRawRows([]);
     setColumnMapping({ name: '', mobile: '' });
     setAnalysis(null);
+    setDetectedPlatform(null);
     setImportResults(null);
     setProgress({ current: 0, total: 0 });
     onClose();
@@ -187,6 +191,15 @@ export const CandidateImportModal: React.FC<CandidateImportModalProps> = ({
       const detectedMapping = autoDetectColumnMapping(parsed.headers);
       setColumnMapping(detectedMapping);
 
+      // Auto-detect platform and pre-select source
+      const platformInfo = detectPlatform(parsed.headers);
+      setDetectedPlatform(platformInfo.platform);
+      if (platformInfo.platform === 'Naukri.com') {
+        setSource('Naukri');
+      } else if (platformInfo.platform === 'WorkIndia') {
+        setSource('WorkIndia');
+      }
+
       toast.success(`Loaded ${parsed.rawRows.length} rows from "${selectedFile.name}"`);
       setStep('mapping');
     } catch (err: any) {
@@ -206,7 +219,7 @@ export const CandidateImportModal: React.FC<CandidateImportModalProps> = ({
       mapping: columnMapping,
       source: effectiveSource,
       existingCandidates: candidates,
-      defaultLocation: defaultLocation.trim() || 'Raipur',
+      defaultLocation: defaultLocation.trim() || undefined,
     });
 
     setAnalysis(analyzed);
@@ -302,16 +315,25 @@ export const CandidateImportModal: React.FC<CandidateImportModalProps> = ({
               notes: item.parsed.notes,
               source: item.parsed.source,
               owner_id: currentUser,
+              created_by: userId || undefined,
+              assigned_to: userId || undefined,
               status: 'Active',
               is_active: true,
             });
             successful++;
           } catch (err: any) {
             failed++;
+            const errMsg = err?.message || 'Insert error';
+            const isDuplicate =
+              errMsg.includes('idx_candidates_mobile_active') ||
+              errMsg.includes('duplicate key') ||
+              errMsg.includes('23505');
             failedRows.push({
               row: item.rowNumber,
               name: item.parsed.name,
-              error: err?.message || 'Insert error',
+              error: isDuplicate
+                ? 'Mobile number already registered in CRM (Concurrent duplicate prevented)'
+                : errMsg,
             });
           }
         })
@@ -549,6 +571,33 @@ export const CandidateImportModal: React.FC<CandidateImportModalProps> = ({
               <Badge variant="info">Source: {effectiveSource}</Badge>
             </div>
 
+            {/* Platform Identification & Handling Notice */}
+            {detectedPlatform === 'Naukri.com' && (
+              <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl space-y-1.5 text-xs text-amber-900">
+                <div className="flex items-center gap-1.5 font-semibold text-amber-950">
+                  <AlertTriangle size={14} className="text-amber-600 shrink-0" />
+                  <span>Naukri.com Profile &amp; Metadata Handling</span>
+                </div>
+                <ul className="text-[11px] text-amber-800 space-y-0.5 list-disc list-inside">
+                  <li><strong>Annual Salary vs Monthly:</strong> Annual Salary (CTC) is saved into candidate notes and never converted into monthly salary.</li>
+                  <li><strong>34 Activity Columns Excluded:</strong> Download, Viewed, Emailed, Calling Status, Comments 1-5, and workflow timestamps describe internal Naukri activities and are skipped from CRM tasks/logs.</li>
+                  <li><strong>Acquisition Source:</strong> Set to <strong>Naukri.com</strong> (internal portal tag &apos;Classified&apos; is preserved in notes).</li>
+                </ul>
+              </div>
+            )}
+
+            {detectedPlatform === 'WorkIndia' && (
+              <div className="p-2.5 bg-blue-50/70 border border-blue-200 rounded-xl flex items-start gap-2 text-xs text-blue-900">
+                <UserCheck size={15} className="text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-blue-950">WorkIndia Export Detected</p>
+                  <p className="text-[11px] text-blue-800 mt-0.5">
+                    Monthly Salary, Relevant Experience, and Profile Links are mapped. Placeholder values (like &apos;-&apos; or &apos;NA&apos;) are treated as empty.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <p className="text-xs font-semibold text-slate-700">
                 Map Spreadsheet Columns to Candidate Fields:
@@ -668,13 +717,31 @@ export const CandidateImportModal: React.FC<CandidateImportModalProps> = ({
                     onChange={(e) => setColumnMapping({ ...columnMapping, location: e.target.value || undefined })}
                     className="w-full text-xs border rounded-md p-1.5 bg-white border-slate-200"
                   >
-                    <option value="">-- None (Use {defaultLocation}) --</option>
+                    <option value="">-- None (Leave unassigned / missing) --</option>
                     {sheetHeaders.map((h) => (
                       <option key={h} value={h}>
                         {h}
                       </option>
                     ))}
                   </select>
+                </div>
+
+                {/* Optional Fallback City for Missing Locations */}
+                <div className="p-2.5 rounded-lg border border-slate-200 bg-white space-y-1">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-semibold text-slate-800">Fallback City (If Missing in File)</span>
+                    <Badge variant="neutral">Optional</Badge>
+                  </div>
+                  <input
+                    type="text"
+                    value={defaultLocation}
+                    onChange={(e) => setDefaultLocation(e.target.value)}
+                    placeholder="Leave blank to preserve missing location"
+                    className="w-full text-xs border rounded-md p-1.5 bg-white border-slate-200 text-slate-700 placeholder:text-slate-400"
+                  />
+                  <p className="text-[10px] text-slate-400">
+                    Applied only to rows with no location. Leave blank to keep location unassigned.
+                  </p>
                 </div>
 
                 {/* Expected Salary */}

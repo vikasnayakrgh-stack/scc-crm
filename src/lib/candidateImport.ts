@@ -49,12 +49,96 @@ export interface ProcessedImportRow {
   };
 }
 
+export type DetectedPlatform = 'Naukri.com' | 'WorkIndia' | 'Generic';
+
+export const NAUKRI_UNSUPPORTED_METADATA_HEADERS = [
+  'Last Workflow activity',
+  'Last Workflow activity by',
+  'Time of Last Workflow activity Update',
+  'Latest Pipeline Stage',
+  'Pipeline Status Updated By',
+  'Time when Stage updated',
+  'Download',
+  'Downloaded By',
+  'Time Of Download',
+  'Viewed',
+  'Viewed By',
+  'Time Of View',
+  'Emailed',
+  'Emailed By',
+  'Time Of Email',
+  'Calling Status',
+  'Calling Status updated by',
+  'Time of Calling activity update',
+  'Comment 1',
+  'Comment 1 BY',
+  'Time Comment 1 posted',
+  'Comment 2',
+  'Comment 2 BY',
+  'Time Comment 2 posted',
+  'Comment 3',
+  'Comment 3 BY',
+  'Time Comment 3 posted',
+  'Comment 4',
+  'Comment 4 BY',
+  'Time Comment 4 posted',
+  'Comment 5',
+  'Comment 5 BY',
+  'Time Comment 5 posted',
+  'Source', // Naukri internal source ('Classified') - must not overwrite CRM acquisition source
+];
+
+export function detectPlatform(headers: string[]): {
+  platform: DetectedPlatform;
+  defaultSource: CandidateImportSource;
+  unsupportedMetadata: string[];
+} {
+  const clean = headers.map(h => String(h).toLowerCase().trim());
+  const isNaukri = clean.includes('job title') && (
+    clean.includes('date of application') || 
+    clean.includes('annual salary') || 
+    clean.includes('under graduation degree')
+  );
+
+  if (isNaukri) {
+    const unsupported = headers.filter(h =>
+      NAUKRI_UNSUPPORTED_METADATA_HEADERS.some(uh => uh.toLowerCase() === String(h).toLowerCase().trim())
+    );
+    return {
+      platform: 'Naukri.com',
+      defaultSource: 'Naukri',
+      unsupportedMetadata: unsupported,
+    };
+  }
+
+  const isWorkIndia = clean.includes('level of experience') || 
+    clean.includes('relevant experience') || 
+    clean.includes('applied at') || 
+    clean.includes('languages known');
+
+  if (isWorkIndia) {
+    return {
+      platform: 'WorkIndia',
+      defaultSource: 'WorkIndia',
+      unsupportedMetadata: [],
+    };
+  }
+
+  return {
+    platform: 'Generic',
+    defaultSource: 'Other',
+    unsupportedMetadata: [],
+  };
+}
+
 export interface ImportAnalysisSummary {
   totalRows: number;
   readyCount: number;
   duplicateInFileCount: number;
   alreadyInCrmCount: number;
   invalidCount: number;
+  detectedPlatform?: DetectedPlatform;
+  unsupportedMetadataHeaders?: string[];
   rows: ProcessedImportRow[];
 }
 
@@ -125,14 +209,17 @@ const HEADER_ALIASES: Record<keyof ColumnMapping, string[]> = {
     'email', 'email id', 'emailid', 'email address', 'mail', 'mail id'
   ],
   qualification: [
-    'qualification', 'education', 'highest qualification', 'degree', 'course', 'edu'
+    'qualification', 'education', 'highest qualification', 'degree', 'course', 'edu',
+    'under graduation degree', 'post graduation degree', 'highest education'
   ],
   experience: [
     'experience', 'work experience', 'total experience', 'exp', 'exp (yrs)',
-    'experience (years)', 'experience in years', 'experience_years', 'total exp'
+    'experience (years)', 'experience in years', 'experience_years', 'total exp',
+    'level of experience', 'relevant experience'
   ],
   current_salary: [
-    'current salary', 'current_salary', 'present salary', 'current ctc', 'ctc', 'current package'
+    'current salary', 'current_salary', 'present salary', 'current ctc', 'ctc', 'current package',
+    'annual salary'
   ],
   expected_salary: [
     'expected salary', 'expected_salary', 'exp salary', 'expected ctc',
@@ -140,7 +227,7 @@ const HEADER_ALIASES: Record<keyof ColumnMapping, string[]> = {
   ],
   location: [
     'city', 'location', 'current location', 'address', 'preferred location',
-    'town', 'current city', 'state'
+    'town', 'current city', 'state', 'preferred locations'
   ],
   skills: [
     'skills', 'key skills', 'skillset', 'technologies', 'it skills',
@@ -148,13 +235,16 @@ const HEADER_ALIASES: Record<keyof ColumnMapping, string[]> = {
   ],
   last_role: [
     'designation', 'role', 'current role', 'job title', 'profile', 'post',
-    'last role', 'current designation', 'applied role', 'job'
+    'last role', 'current designation', 'applied role', 'job',
+    'previous designation', 'curr company designation'
   ],
   notice_period: [
-    'notice period', 'notice_period', 'notice', 'availability'
+    'notice period', 'notice_period', 'notice', 'availability',
+    'notice period availability to join'
   ],
   notes: [
-    'notes', 'remarks', 'comment', 'comments', 'recruiter notes', 'summary'
+    'notes', 'remarks', 'comment', 'comments', 'recruiter notes', 'summary',
+    'resume headline'
   ],
 };
 
@@ -252,7 +342,7 @@ export function analyzeImportRows({
   mapping,
   source,
   existingCandidates,
-  defaultLocation = 'Raipur',
+  defaultLocation = '',
 }: {
   rawRows: Record<string, any>[];
   mapping: ColumnMapping;
@@ -276,6 +366,31 @@ export function analyzeImportRows({
 
   const processedRows: ProcessedImportRow[] = [];
 
+  // Helper to check for placeholder or empty values
+  const isPlaceholder = (val: any): boolean => {
+    if (val === null || val === undefined) return true;
+    const s = String(val).trim().toUpperCase();
+    return (
+      s === '' ||
+      s === 'NA' ||
+      s === 'N/A' ||
+      s === '-' ||
+      s === 'NULL' ||
+      s === 'NOT MENTIONED' ||
+      s === 'NONE' ||
+      s === 'UNDEFINED'
+    );
+  };
+
+  // Detect platform from headers if available
+  const sampleHeaders = rawRows.length > 0 ? Object.keys(rawRows[0] || {}) : [];
+  const platformInfo = detectPlatform(sampleHeaders);
+
+  // Check if current_salary is mapped to an Annual Salary column
+  const isAnnualSalaryColumn = Boolean(
+    mapping.current_salary && /annual|ctc|package/i.test(mapping.current_salary)
+  );
+
   rawRows.forEach((row, idx) => {
     const rowNumber = idx + 2; // Row 1 is header, data starts at Row 2
 
@@ -295,38 +410,158 @@ export function analyzeImportRows({
     const cleanName = String(rawName || '').trim();
     const phoneCheck = normalizePhone(rawMobile);
 
-    // Parse numeric experience (e.g. "2.5 yrs" -> 2.5)
+    // Parse numeric experience (e.g. "Fresher" -> 0, "15 years in HR" -> 15, "2.5 yrs" -> 2.5)
+    // Preserves meaningful distinction between Fresher, explicit 0 years, and missing experience
     let experienceNum = 0;
-    if (rawExp !== undefined && rawExp !== '') {
-      const parsedExp = parseFloat(String(rawExp).replace(/[^0-9.]/g, ''));
-      experienceNum = isNaN(parsedExp) ? 0 : Math.min(50, Math.max(0, parsedExp));
+    let expDistinctionNote: string | undefined = undefined;
+    if (!isPlaceholder(rawExp)) {
+      const expStr = String(rawExp).trim();
+      if (/fresher/i.test(expStr)) {
+        experienceNum = 0;
+        expDistinctionNote = 'Experience: Fresher';
+      } else {
+        const parsedExp = parseFloat(expStr.replace(/[^0-9.]/g, ''));
+        experienceNum = isNaN(parsedExp) ? 0 : Math.min(50, Math.max(0, parsedExp));
+      }
+    } else {
+      experienceNum = 0;
+      expDistinctionNote = 'Experience: Not Specified';
     }
 
-    // Parse salaries
+    // Parse expected salary (monthly ₹)
     let expSalNum = 0;
-    if (rawExpSal !== undefined && rawExpSal !== '') {
+    if (!isPlaceholder(rawExpSal)) {
       const parsedSal = parseInt(String(rawExpSal).replace(/[^0-9]/g, ''), 10);
       expSalNum = isNaN(parsedSal) ? 0 : parsedSal;
     }
 
+    // Parse current salary (monthly ₹) vs Annual Salary protection
     let currSalNum: number | undefined = undefined;
-    if (rawCurrSal !== undefined && rawCurrSal !== '') {
-      const parsedCurr = parseInt(String(rawCurrSal).replace(/[^0-9]/g, ''), 10);
-      currSalNum = isNaN(parsedCurr) ? undefined : parsedCurr;
+    let annualSalaryNote: string | undefined = undefined;
+
+    if (!isPlaceholder(rawCurrSal)) {
+      const currSalStr = String(rawCurrSal).trim();
+      if (isAnnualSalaryColumn) {
+        // Annual Salary: NEVER silently treat as monthly salary!
+        // Missing monthly salary remains undefined (NULL in database).
+        currSalNum = undefined;
+        annualSalaryNote = `Annual CTC (${mapping.current_salary}): ₹${currSalStr}`;
+      } else {
+        const parsedCurr = parseInt(currSalStr.replace(/[^0-9]/g, ''), 10);
+        currSalNum = (!isNaN(parsedCurr) && parsedCurr > 0) ? parsedCurr : undefined;
+      }
     }
 
-    // Parse skills list
+    // Parse skills list (handles comma, semicolon, slash, pipe delimiters)
+    // Do NOT invent skills. Preserve missing skills as an empty array [].
     const skillsList = String(rawSkills || '')
       .split(/[,;|/]/)
       .map(s => s.trim())
-      .filter(Boolean);
-    if (skillsList.length === 0) {
-      skillsList.push('General');
+      .filter(s => Boolean(s) && !isPlaceholder(s));
+
+    // Location parsing with fallback:
+    // Do not silently assign Raipur or any city if missing in source.
+    // Preserve as missing ('') unless recruiter explicitly provided a defaultLocation.
+    let cleanLocation = '';
+    if (!isPlaceholder(rawLoc)) {
+      cleanLocation = String(rawLoc).trim();
+    } else if (row['City'] && !isPlaceholder(row['City'])) {
+      cleanLocation = String(row['City']).trim();
+    } else if (defaultLocation && defaultLocation.trim()) {
+      cleanLocation = defaultLocation.trim();
     }
 
-    const cleanLocation = String(rawLoc || '').trim() || defaultLocation;
-    const cleanRole = String(rawRole || '').trim() || 'Candidate';
-    const cleanEmail = String(rawEmail || '').trim() || undefined;
+    // Role / Designation with portal fallbacks
+    let cleanRole = 'Candidate';
+    if (!isPlaceholder(rawRole)) {
+      cleanRole = String(rawRole).trim();
+    } else if (row['Curr. Company Designation'] && !isPlaceholder(row['Curr. Company Designation'])) {
+      cleanRole = String(row['Curr. Company Designation']).trim();
+    } else if (row['Job Title'] && !isPlaceholder(row['Job Title'])) {
+      cleanRole = String(row['Job Title']).trim();
+    } else if (row['Previous Designation'] && !isPlaceholder(row['Previous Designation'])) {
+      cleanRole = String(row['Previous Designation']).trim();
+    }
+
+    // Email & Notice Period sanitization
+    const cleanEmail = !isPlaceholder(rawEmail) ? String(rawEmail).trim() : undefined;
+    const cleanNotice = !isPlaceholder(rawNotice) ? String(rawNotice).trim() : undefined;
+
+    // Qualification parsing (check degree columns if unmapped or NA)
+    let cleanQual: string | undefined = undefined;
+    if (!isPlaceholder(rawQual)) {
+      cleanQual = String(rawQual).trim();
+    } else if (row['Post graduation degree'] && !isPlaceholder(row['Post graduation degree'])) {
+      cleanQual = String(row['Post graduation degree']).trim();
+    } else if (row['Under Graduation degree'] && !isPlaceholder(row['Under Graduation degree'])) {
+      cleanQual = String(row['Under Graduation degree']).trim();
+    }
+
+    // Enriched Profile Notes: preserve all meaningful candidate details without corrupting schema
+    const noteParts: string[] = [];
+    if (!isPlaceholder(rawNotes)) {
+      const rawNotesStr = String(rawNotes).trim();
+      if (mapping.notes && /headline/i.test(mapping.notes)) {
+        noteParts.push(`Resume Headline: ${rawNotesStr}`);
+      } else {
+        noteParts.push(rawNotesStr);
+      }
+    }
+    if (annualSalaryNote) {
+      noteParts.push(annualSalaryNote);
+    }
+    if (expDistinctionNote) {
+      noteParts.push(expDistinctionNote);
+    }
+    // Naukri profile metadata
+    if (row['Date of application'] && !isPlaceholder(row['Date of application'])) {
+      noteParts.push(`Applied: ${String(row['Date of application']).trim()}`);
+    }
+    if (row['Resume Headline'] && !isPlaceholder(row['Resume Headline']) && !noteParts.some(p => p.includes(String(row['Resume Headline']).trim()))) {
+      noteParts.push(`Resume Headline: ${String(row['Resume Headline']).trim()}`);
+    }
+    if (row['Summary'] && !isPlaceholder(row['Summary']) && !noteParts.some(p => p.includes(String(row['Summary']).trim()))) {
+      noteParts.push(`Summary: ${String(row['Summary']).trim()}`);
+    }
+    if (row['Preferred Locations'] && !isPlaceholder(row['Preferred Locations'])) {
+      noteParts.push(`Preferred Locations: ${String(row['Preferred Locations']).trim()}`);
+    }
+    if (row['Curr. Company name'] && !isPlaceholder(row['Curr. Company name'])) {
+      noteParts.push(`Company: ${String(row['Curr. Company name']).trim()}`);
+    }
+    if (row['Department'] && !isPlaceholder(row['Department'])) {
+      noteParts.push(`Department: ${String(row['Department']).trim()}`);
+    }
+    if (row['Industry'] && !isPlaceholder(row['Industry'])) {
+      noteParts.push(`Industry: ${String(row['Industry']).trim()}`);
+    }
+    if (row['Source'] && String(row['Source']).trim().toLowerCase() === 'classified') {
+      noteParts.push(`Portal Tag: Classified`);
+    }
+
+    // WorkIndia profile metadata
+    if (row['Relevant Experience'] && !isPlaceholder(row['Relevant Experience'])) {
+      noteParts.push(`Relevant Exp: ${String(row['Relevant Experience']).trim()}`);
+    }
+    if (row['Languages Known'] && !isPlaceholder(row['Languages Known'])) {
+      noteParts.push(`Languages: ${String(row['Languages Known']).trim()}`);
+    }
+    if (row['English Speaking'] && !isPlaceholder(row['English Speaking'])) {
+      noteParts.push(`English: ${String(row['English Speaking']).trim()}`);
+    }
+    if (row['Profile Link'] && !isPlaceholder(row['Profile Link'])) {
+      noteParts.push(`Profile: ${String(row['Profile Link']).trim()}`);
+    }
+    if (row['College Name'] && !isPlaceholder(row['College Name'])) {
+      noteParts.push(`College: ${String(row['College Name']).trim()}`);
+    }
+
+    const cleanNotes = noteParts.length > 0 ? noteParts.join(' | ') : undefined;
+
+    // Source Attribution Guarantee:
+    // Always use user-selected CRM acquisition source (e.g. 'Naukri.com' or 'WorkIndia')
+    // Never allow 'Classified' from Naukri column 71 to overwrite the CRM acquisition source
+    const effectiveSource = (source && source.toLowerCase() !== 'classified') ? source : (platformInfo.platform === 'Naukri.com' ? 'Naukri.com' : 'Job Portal');
 
     let status: RowImportStatus = 'ready';
     let statusReason: string | undefined = undefined;
@@ -378,11 +613,11 @@ export function analyzeImportRows({
         location: cleanLocation,
         expected_salary: expSalNum,
         current_salary: currSalNum,
-        qualification: String(rawQual || '').trim() || undefined,
-        notice_period: String(rawNotice || '').trim() || undefined,
+        qualification: cleanQual,
+        notice_period: cleanNotice,
         last_role: cleanRole,
-        notes: String(rawNotes || '').trim() || undefined,
-        source: source || 'Job Portal',
+        notes: cleanNotes,
+        source: effectiveSource,
       },
     });
   });
@@ -393,6 +628,8 @@ export function analyzeImportRows({
     duplicateInFileCount: processedRows.filter(r => r.status === 'duplicate_in_file').length,
     alreadyInCrmCount: processedRows.filter(r => r.status === 'already_in_crm').length,
     invalidCount: processedRows.filter(r => r.status === 'invalid').length,
+    detectedPlatform: platformInfo.platform,
+    unsupportedMetadataHeaders: platformInfo.unsupportedMetadata,
     rows: processedRows,
   };
 }
