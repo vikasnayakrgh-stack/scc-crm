@@ -9,9 +9,10 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { candidateSchema, type CandidateInput, parseSkills } from '../lib/validation';
 import { calculateCandidateJobMatch } from '../lib/matching';
+import { scheduleInterviewWithApplication } from '../lib/pipelineHelpers';
 
 export default function Candidates() {
-  const { candidates, jobs, loading, insert } = useData();
+  const { candidates, jobs, applications, loading, insert, update } = useData();
   const { currentUser } = useUser();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Placed' | 'Blacklisted'>('All');
@@ -98,15 +99,21 @@ export default function Candidates() {
   const handleSchedule = async (jobId: string, time: string) => {
     if (!selectedCandidate) return;
     try {
-      await insert('interviews', {
-        candidate_id: selectedCandidate.id,
-        job_id: jobId,
-        scheduled_time: time,
-        status: 'Scheduled',
-        feedback: '',
-        is_active: true,
+      const result = await scheduleInterviewWithApplication({
+        candidateId: selectedCandidate.id,
+        jobId,
+        scheduledTime: time,
+        currentUser,
+        existingApplications: applications,
+        insert,
+        update,
       });
-      toast.success('Interview scheduled successfully!');
+
+      if (result.applicationCreated) {
+        toast.success('Application created in pipeline & interview scheduled!');
+      } else {
+        toast.success('Interview scheduled and linked to existing application!');
+      }
       setSelectedCandidate(null);
     } catch (e: any) {
       toast.error('Schedule failed: ' + (e?.message || 'Error'));

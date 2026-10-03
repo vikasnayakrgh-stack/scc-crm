@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
+import { useUser } from '../context/UserContext';
 import { Badge, Button, CardSkeleton, Modal, Input, Label } from '../components/ui';
 import { CheckCircle, XCircle, Clock, Calendar, Briefcase, Plus, UserCheck } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { Interview } from '../types';
+import { scheduleInterviewWithApplication } from '../lib/pipelineHelpers';
 
 const getStatusColor = (s: string) => {
   switch (s) {
@@ -26,7 +28,8 @@ const getStatusBorderColor = (s: string) => {
 };
 
 export default function Interviews() {
-  const { interviews, candidates, jobs, loading, insert, update } = useData();
+  const { interviews, candidates, jobs, applications, loading, insert, update } = useData();
+  const { currentUser } = useUser();
   const [filter, setFilter] = useState<'All' | 'Scheduled' | 'Selected' | 'Done' | 'NoShow'>('All');
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [selectedCandidateId, setSelectedCandidateId] = useState('');
@@ -43,9 +46,28 @@ export default function Interviews() {
       await update('interviews', { id, status });
 
       if (status === 'Selected') {
+        const targetInterview = interviews.find((i) => i.id === id);
+        if (targetInterview) {
+          const linkedApp = applications.find(
+            (a) =>
+              a.id === targetInterview.application_id ||
+              (a.candidate_id === targetInterview.candidate_id &&
+                a.job_id === targetInterview.job_id &&
+                a.is_active !== false)
+          );
+          if (
+            linkedApp &&
+            linkedApp.stage !== 'Selected' &&
+            linkedApp.stage !== 'Joined' &&
+            linkedApp.stage !== 'Placed'
+          ) {
+            await update('applications', { id: linkedApp.id, stage: 'Selected' });
+          }
+        }
+
         toast.success(
-          'Candidate selected! Note: Candidate is NOT marked as placed until Offer is accepted and joining is confirmed.',
-          { duration: 4000 }
+          'Candidate selected & pipeline stage updated! (Candidate is not Placed until joining is confirmed)',
+          { duration: 4500 }
         );
       } else {
         toast.success(`Interview marked as ${status}`);
@@ -63,16 +85,21 @@ export default function Interviews() {
     }
 
     try {
-      await insert('interviews', {
-        candidate_id: selectedCandidateId,
-        job_id: selectedJobId,
-        scheduled_time: scheduledTime,
-        status: 'Scheduled',
-        feedback: '',
-        is_active: true,
+      const result = await scheduleInterviewWithApplication({
+        candidateId: selectedCandidateId,
+        jobId: selectedJobId,
+        scheduledTime,
+        currentUser,
+        existingApplications: applications,
+        insert,
+        update,
       });
 
-      toast.success('Interview scheduled successfully!');
+      if (result.applicationCreated) {
+        toast.success('Application created in pipeline & interview scheduled!');
+      } else {
+        toast.success('Interview scheduled and linked to existing application!');
+      }
       setIsScheduleOpen(false);
       setSelectedCandidateId('');
       setSelectedJobId('');

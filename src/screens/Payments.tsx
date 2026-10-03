@@ -7,10 +7,12 @@ import { toast } from 'react-hot-toast';
 import { PaymentRecord } from '../types';
 
 export default function Payments() {
-  const { payments, candidates, employers, loading, insert, update } = useData();
-  const { currentUser } = useUser();
+  const { payments, candidates, employers, jobs, loading, insert, update } = useData();
+  const { currentUser, appRole } = useUser();
   const [filter, setFilter] = useState<'All' | 'Registration' | 'Placement' | 'Pending'>('All');
   const [isAddOpen, setIsAddOpen] = useState(false);
+
+  const isAdminOrManager = appRole === 'admin' || appRole === 'manager' || currentUser === 'Admin';
 
   const [paymentType, setPaymentType] = useState<PaymentRecord['type']>('Candidate_Registration');
   const [amount, setAmount] = useState('200'); // Default ₹200 verified from SCC records, but fully editable!
@@ -18,6 +20,7 @@ export default function Payments() {
   const [status, setStatus] = useState<PaymentRecord['status']>('Paid');
   const [candidateId, setCandidateId] = useState('');
   const [employerId, setEmployerId] = useState('');
+  const [jobId, setJobId] = useState('');
   const [referenceNo, setReferenceNo] = useState('');
   const [notes, setNotes] = useState('');
 
@@ -52,39 +55,75 @@ export default function Payments() {
       return;
     }
 
+    // P0-02: Recruiters can only submit Employer_Placement in Pending/Draft status
+    const effectiveStatus: PaymentRecord['status'] =
+      !isAdminOrManager && (paymentType === 'Employer_Placement' || paymentType === 'Other')
+        ? 'Pending'
+        : status;
+
     try {
       await insert('payments', {
         type: paymentType,
         amount: numAmount,
         payment_method: paymentMethod,
-        status,
+        status: effectiveStatus,
         candidate_id: candidateId || undefined,
         employer_id: employerId || undefined,
+        job_id: jobId || undefined,
         reference_no: referenceNo.trim() || undefined,
         notes: notes.trim() || undefined,
-        paid_at: new Date().toISOString(),
+        paid_at: effectiveStatus === 'Paid' ? new Date().toISOString() : undefined,
         recorded_by: currentUser,
         is_active: true,
       });
 
-      toast.success('Payment recorded successfully!');
+      // P0-03: When candidate registration is recorded as Paid, update candidate flag immediately
+      if (paymentType === 'Candidate_Registration' && effectiveStatus === 'Paid' && candidateId) {
+        try {
+          await update('candidates', { id: candidateId, registration_fee_paid: true });
+        } catch (err) {
+          console.warn('Candidate registration fee update notice:', err);
+        }
+      }
+
+      toast.success(
+        effectiveStatus === 'Pending'
+          ? 'Payment entry submitted (Pending clearance)!'
+          : 'Payment recorded successfully!'
+      );
       setIsAddOpen(false);
       setReferenceNo('');
       setNotes('');
       setCandidateId('');
       setEmployerId('');
+      setJobId('');
     } catch (err: any) {
       toast.error(err?.message || 'Failed to record payment');
     }
   };
 
-  const markPaymentReceived = async (id: string) => {
+  const markPaymentReceived = async (paymentId: string) => {
+    if (!isAdminOrManager) {
+      toast.error('Unauthorized: Only Admin or Manager can mark payments as received.');
+      return;
+    }
+
     try {
+      const targetPayment = payments.find((p) => p.id === paymentId);
       await update('payments', {
-        id,
+        id: paymentId,
         status: 'Paid',
         paid_at: new Date().toISOString(),
       });
+
+      // P0-03: If marked received was for candidate registration, ensure candidate flag is set
+      if (targetPayment?.type === 'Candidate_Registration' && targetPayment.candidate_id) {
+        await update('candidates', {
+          id: targetPayment.candidate_id,
+          registration_fee_paid: true,
+        });
+      }
+
       toast.success('Payment marked as received!');
     } catch (e: any) {
       toast.error(e?.message || 'Update failed');
@@ -213,12 +252,18 @@ export default function Payments() {
                   </div>
 
                   {p.status === 'Pending' && (
-                    <button
-                      onClick={() => markPaymentReceived(p.id)}
-                      className="text-xs px-2.5 py-1 bg-emerald-50 text-emerald-700 font-semibold rounded hover:bg-emerald-100 flex items-center gap-1"
-                    >
-                      <CheckCircle2 size={13} /> Mark Received
-                    </button>
+                    isAdminOrManager ? (
+                      <button
+                        onClick={() => markPaymentReceived(p.id)}
+                        className="text-xs px-2.5 py-1 bg-emerald-50 text-emerald-700 font-semibold rounded hover:bg-emerald-100 flex items-center gap-1"
+                      >
+                        <CheckCircle2 size={13} /> Mark Received
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded font-medium">
+                        Pending Admin Clearance
+                      </span>
+                    )
                   )}
                 </div>
               </div>
@@ -237,8 +282,12 @@ export default function Payments() {
               onChange={(e) => {
                 const t = e.target.value as PaymentRecord['type'];
                 setPaymentType(t);
-                if (t === 'Candidate_Registration') setAmount('200');
-                else if (t === 'Employer_Placement') setAmount('15000');
+                if (t === 'Candidate_Registration') {
+                  setAmount('200');
+                } else if (t === 'Employer_Placement') {
+                  setAmount('15000');
+                  if (!isAdminOrManager) setStatus('Pending');
+                }
               }}
               className="w-full text-xs border rounded-md p-2 bg-white"
             >
@@ -275,14 +324,20 @@ export default function Payments() {
 
           <div>
             <Label>Status</Label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as any)}
-              className="w-full text-xs border rounded-md p-2 bg-white"
-            >
-              <option value="Paid">Received / Paid</option>
-              <option value="Pending">Pending / Receivable (Due)</option>
-            </select>
+            {!isAdminOrManager && (paymentType === 'Employer_Placement' || paymentType === 'Other') ? (
+              <div className="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                <span className="font-semibold">Pending / Due</span> — Recruiters submit placement invoices as Pending for Admin clearance.
+              </div>
+            ) : (
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as any)}
+                className="w-full text-xs border rounded-md p-2 bg-white"
+              >
+                <option value="Paid">Received / Paid</option>
+                <option value="Pending">Pending / Receivable (Due)</option>
+              </select>
+            )}
           </div>
 
           {paymentType === 'Candidate_Registration' && (
@@ -304,21 +359,56 @@ export default function Payments() {
           )}
 
           {paymentType === 'Employer_Placement' && (
-            <div>
-              <Label>Select Employer / Client</Label>
-              <select
-                value={employerId}
-                onChange={(e) => setEmployerId(e.target.value)}
-                className="w-full text-xs border rounded-md p-2 bg-white"
-              >
-                <option value="">Select Employer...</option>
-                {employers.map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.company_name} ({emp.location})
-                  </option>
-                ))}
-              </select>
-            </div>
+            <>
+              <div>
+                <Label>Select Employer / Client</Label>
+                <select
+                  value={employerId}
+                  onChange={(e) => setEmployerId(e.target.value)}
+                  className="w-full text-xs border rounded-md p-2 bg-white"
+                  required
+                >
+                  <option value="">Select Employer...</option>
+                  {employers.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.company_name} ({emp.location})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <Label>Select Placed Candidate (Optional)</Label>
+                <select
+                  value={candidateId}
+                  onChange={(e) => setCandidateId(e.target.value)}
+                  className="w-full text-xs border rounded-md p-2 bg-white"
+                >
+                  <option value="">Select Placed Candidate...</option>
+                  {candidates.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.mobile}) - {c.last_role}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <Label>Select Job Opening (Optional)</Label>
+                <select
+                  value={jobId}
+                  onChange={(e) => setJobId(e.target.value)}
+                  className="w-full text-xs border rounded-md p-2 bg-white"
+                >
+                  <option value="">Select Job Opening...</option>
+                  {jobs.map((j) => (
+                    <option key={j.id} value={j.id}>
+                      {j.role} @ {j.company_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
           )}
 
           <div>

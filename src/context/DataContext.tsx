@@ -229,7 +229,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       case 'interviews': setInterviews(updateList); break;
       case 'call_logs': setCallLogs(updateList); break;
       case 'tasks': setTasks(updateList); break;
-      case 'payments': setPayments(updateList); break;
+      case 'payments':
+        setPayments(updateList);
+        if (record.type === 'Candidate_Registration' && record.candidate_id && record.status === 'Paid') {
+          setCandidates(prev => prev.map(c => c.id === record.candidate_id ? { ...c, registration_fee_paid: true } : c));
+        }
+        break;
     }
   }, []);
 
