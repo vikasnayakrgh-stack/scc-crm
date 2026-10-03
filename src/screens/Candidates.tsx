@@ -2,12 +2,19 @@ import React, { useState, useMemo } from 'react';
 import { useData } from '../context/DataContext';
 import { useUser } from '../context/UserContext';
 import { Button, Input, Modal, Label, Badge, CardSkeleton } from '../components/ui';
-import { Phone, MessageCircle, Calendar, UserPlus, Search } from 'lucide-react';
+import { Phone, MessageCircle, Calendar, UserPlus, Search, Pencil } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { Candidate } from '../types';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { candidateSchema, type CandidateInput, parseSkills } from '../lib/validation';
+import {
+  candidateSchema,
+  type CandidateInput,
+  parseSkills,
+  QUALIFICATION_OPTIONS,
+  NOTICE_PERIOD_OPTIONS,
+  ACQUISITION_SOURCE_OPTIONS,
+} from '../lib/validation';
 import { calculateCandidateJobMatch } from '../lib/matching';
 import { scheduleInterviewWithApplication } from '../lib/pipelineHelpers';
 
@@ -17,9 +24,27 @@ export default function Candidates() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Placed' | 'Blacklisted'>('All');
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+  const [editingCandidate, setEditingCandidate] = useState<Candidate | null>(null);
 
-  const form = useForm<CandidateInput>({
+  // Custom options state for Add modal
+  const [addQualSelect, setAddQualSelect] = useState('');
+  const [addCustomQual, setAddCustomQual] = useState('');
+  const [addNoticeSelect, setAddNoticeSelect] = useState('');
+  const [addCustomNotice, setAddCustomNotice] = useState('');
+  const [addSourceSelect, setAddSourceSelect] = useState('');
+  const [addCustomSource, setAddCustomSource] = useState('');
+
+  // Custom options state for Edit modal
+  const [editQualSelect, setEditQualSelect] = useState('');
+  const [editCustomQual, setEditCustomQual] = useState('');
+  const [editNoticeSelect, setEditNoticeSelect] = useState('');
+  const [editCustomNotice, setEditCustomNotice] = useState('');
+  const [editSourceSelect, setEditSourceSelect] = useState('');
+  const [editCustomSource, setEditCustomSource] = useState('');
+
+  const addForm = useForm<CandidateInput>({
     resolver: zodResolver(candidateSchema),
     defaultValues: {
       name: '',
@@ -28,9 +53,28 @@ export default function Candidates() {
       skills: '',
       location: '',
       expected_salary: 0,
+      current_salary: 0,
       last_role: '',
       email: '',
       notes: '',
+      status: 'Active',
+    },
+  });
+
+  const editForm = useForm<CandidateInput>({
+    resolver: zodResolver(candidateSchema),
+    defaultValues: {
+      name: '',
+      mobile: '',
+      experience: 0,
+      skills: '',
+      location: '',
+      expected_salary: 0,
+      current_salary: 0,
+      last_role: '',
+      email: '',
+      notes: '',
+      status: 'Active',
     },
   });
 
@@ -40,7 +84,9 @@ export default function Candidates() {
         c.name.toLowerCase().includes(search.toLowerCase()) ||
         c.mobile.includes(search) ||
         (c.skills || []).some((s) => s.toLowerCase().includes(search.toLowerCase())) ||
-        (c.last_role || '').toLowerCase().includes(search.toLowerCase());
+        (c.last_role || '').toLowerCase().includes(search.toLowerCase()) ||
+        (c.qualification || '').toLowerCase().includes(search.toLowerCase()) ||
+        (c.location || '').toLowerCase().includes(search.toLowerCase());
 
       const matchesStatus = statusFilter === 'All' || c.status === statusFilter;
       return matchesSearch && matchesStatus;
@@ -69,9 +115,79 @@ export default function Candidates() {
     window.open(`https://wa.me/91${c.mobile.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
-  const onSubmitCandidate = async (data: CandidateInput) => {
+  // Open Edit Modal & prefill form
+  const handleOpenEdit = (c: Candidate) => {
+    setEditingCandidate(c);
+
+    // Resolve qualification
+    if (c.qualification) {
+      if (QUALIFICATION_OPTIONS.includes(c.qualification as any) && c.qualification !== 'Other') {
+        setEditQualSelect(c.qualification);
+        setEditCustomQual('');
+      } else {
+        setEditQualSelect('Other');
+        setEditCustomQual(c.qualification);
+      }
+    } else {
+      setEditQualSelect('');
+      setEditCustomQual('');
+    }
+
+    // Resolve notice period
+    if (c.notice_period) {
+      if (NOTICE_PERIOD_OPTIONS.includes(c.notice_period as any) && c.notice_period !== 'Other') {
+        setEditNoticeSelect(c.notice_period);
+        setEditCustomNotice('');
+      } else {
+        setEditNoticeSelect('Other');
+        setEditCustomNotice(c.notice_period);
+      }
+    } else {
+      setEditNoticeSelect('');
+      setEditCustomNotice('');
+    }
+
+    // Resolve source
+    if (c.source) {
+      if (ACQUISITION_SOURCE_OPTIONS.includes(c.source as any) && c.source !== 'Other') {
+        setEditSourceSelect(c.source);
+        setEditCustomSource('');
+      } else {
+        setEditSourceSelect('Other');
+        setEditCustomSource(c.source);
+      }
+    } else {
+      setEditSourceSelect('');
+      setEditCustomSource('');
+    }
+
+    editForm.reset({
+      name: c.name,
+      mobile: c.mobile,
+      experience: Number(c.experience || 0),
+      skills: (c.skills || []).join(', '),
+      location: c.location || '',
+      expected_salary: Number(c.expected_salary || 0),
+      current_salary: Number(c.current_salary || 0),
+      last_role: c.last_role || '',
+      email: c.email || '',
+      notes: c.notes || '',
+      status: c.status || 'Active',
+    });
+
+    setIsEditOpen(true);
+  };
+
+  const onSubmitAddCandidate = async (data: CandidateInput) => {
     try {
       const skillsArray = parseSkills(data.skills);
+      const effectiveQualification =
+        addQualSelect === 'Other' ? addCustomQual.trim() : addQualSelect.trim();
+      const effectiveNotice =
+        addNoticeSelect === 'Other' ? addCustomNotice.trim() : addNoticeSelect.trim();
+      const effectiveSource =
+        addSourceSelect === 'Other' ? addCustomSource.trim() : addSourceSelect.trim();
+
       await insert('candidates', {
         name: data.name.trim(),
         mobile: data.mobile.trim(),
@@ -80,19 +196,66 @@ export default function Candidates() {
         skills: skillsArray,
         location: data.location.trim(),
         expected_salary: Number(data.expected_salary),
+        current_salary: data.current_salary !== undefined ? Number(data.current_salary) : 0,
         last_role: data.last_role.trim(),
+        qualification: effectiveQualification || undefined,
+        notice_period: effectiveNotice || undefined,
+        source: effectiveSource || undefined,
         notes: data.notes?.trim() || undefined,
         owner_id: currentUser,
-        status: 'Active',
+        status: data.status || 'Active',
         is_active: true,
       });
 
       toast.success('Candidate registered successfully!');
-      form.reset();
+      addForm.reset();
+      setAddQualSelect('');
+      setAddCustomQual('');
+      setAddNoticeSelect('');
+      setAddCustomNotice('');
+      setAddSourceSelect('');
+      setAddCustomSource('');
       setIsAddOpen(false);
     } catch (e: any) {
-      // Do NOT reset form on error so recruiter does not lose their typed input!
       toast.error(e?.message || 'Failed to add candidate. Mobile number may already exist.');
+    }
+  };
+
+  const onSubmitEditCandidate = async (data: CandidateInput) => {
+    if (!editingCandidate) return;
+
+    try {
+      const skillsArray = parseSkills(data.skills);
+      const effectiveQualification =
+        editQualSelect === 'Other' ? editCustomQual.trim() : editQualSelect.trim();
+      const effectiveNotice =
+        editNoticeSelect === 'Other' ? editCustomNotice.trim() : editNoticeSelect.trim();
+      const effectiveSource =
+        editSourceSelect === 'Other' ? editCustomSource.trim() : editSourceSelect.trim();
+
+      await update('candidates', {
+        id: editingCandidate.id,
+        name: data.name.trim(),
+        mobile: data.mobile.trim(),
+        email: data.email?.trim() || undefined,
+        experience: Number(data.experience),
+        skills: skillsArray,
+        location: data.location.trim(),
+        expected_salary: Number(data.expected_salary),
+        current_salary: data.current_salary !== undefined ? Number(data.current_salary) : 0,
+        last_role: data.last_role.trim(),
+        qualification: effectiveQualification || undefined,
+        notice_period: effectiveNotice || undefined,
+        source: effectiveSource || undefined,
+        status: data.status || editingCandidate.status,
+        notes: data.notes?.trim() || undefined,
+      });
+
+      toast.success('Candidate updated successfully!');
+      setIsEditOpen(false);
+      setEditingCandidate(null);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update candidate');
     }
   };
 
@@ -131,7 +294,13 @@ export default function Candidates() {
           </div>
           <Button
             onClick={() => {
-              form.reset();
+              addForm.reset();
+              setAddQualSelect('');
+              setAddCustomQual('');
+              setAddNoticeSelect('');
+              setAddCustomNotice('');
+              setAddSourceSelect('');
+              setAddCustomSource('');
               setIsAddOpen(true);
             }}
             className="flex items-center gap-1 text-xs py-1.5 px-3"
@@ -146,7 +315,7 @@ export default function Candidates() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, phone, skill or role..."
+            placeholder="Search by name, phone, skill, role, qualification, or city..."
             className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -190,8 +359,18 @@ export default function Candidates() {
             >
               <div className="flex justify-between items-start">
                 <div>
-                  <h3 className="font-bold text-slate-800 text-sm">{c.name}</h3>
-                  <p className="text-xs text-slate-500 font-medium">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-slate-800 text-sm">{c.name}</h3>
+                    {c.registration_fee_paid === false && (
+                      <span
+                        className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium border border-amber-200"
+                        title="Registration fee not recorded yet (does not block scheduling)"
+                      >
+                        ₹200 Fee Due
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
                     {c.last_role} • {c.experience} yrs exp • {c.location}
                   </p>
                 </div>
@@ -208,6 +387,25 @@ export default function Candidates() {
                 </Badge>
               </div>
 
+              {/* Extended Info Chips */}
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {c.qualification && (
+                  <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded font-medium">
+                    🎓 {c.qualification}
+                  </span>
+                )}
+                {c.notice_period && (
+                  <span className="text-[10px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded font-medium">
+                    ⏱️ {c.notice_period}
+                  </span>
+                )}
+                {c.source && (
+                  <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">
+                    📍 {c.source}
+                  </span>
+                )}
+              </div>
+
               {/* Skills tags */}
               <div className="flex flex-wrap gap-1 mt-2">
                 {(c.skills || []).map((skill, idx) => (
@@ -222,11 +420,25 @@ export default function Candidates() {
 
               {/* Actions & Salary */}
               <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-100 text-xs">
-                <span className="font-semibold text-slate-700">
-                  ₹{Number(c.expected_salary || 0).toLocaleString('en-IN')} / mo
-                </span>
+                <div>
+                  <span className="font-semibold text-slate-700">
+                    ₹{Number(c.expected_salary || 0).toLocaleString('en-IN')} / mo
+                  </span>
+                  {c.current_salary !== undefined && Number(c.current_salary) > 0 && (
+                    <span className="text-[11px] text-slate-400 font-normal ml-1">
+                      (Cur: ₹{Number(c.current_salary).toLocaleString('en-IN')})
+                    </span>
+                  )}
+                </div>
 
                 <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleOpenEdit(c)}
+                    className="p-1.5 bg-slate-100 text-slate-700 rounded-md hover:bg-slate-200"
+                    title="Edit Candidate"
+                  >
+                    <Pencil size={14} />
+                  </button>
                   <button
                     onClick={() => handleCall(c)}
                     className="p-1.5 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100"
@@ -256,13 +468,13 @@ export default function Candidates() {
 
       {/* Add Candidate Modal */}
       <Modal isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} title="Add New Candidate">
-        <form onSubmit={form.handleSubmit(onSubmitCandidate)} className="space-y-3">
+        <form onSubmit={addForm.handleSubmit(onSubmitAddCandidate)} className="space-y-3">
           <div>
             <Label>Full Name</Label>
             <Input
               placeholder="e.g. Rahul Sharma"
-              {...form.register('name')}
-              error={form.formState.errors.name?.message}
+              {...addForm.register('name')}
+              error={addForm.formState.errors.name?.message}
             />
           </div>
 
@@ -271,8 +483,8 @@ export default function Candidates() {
             <Input
               type="tel"
               placeholder="9876543210"
-              {...form.register('mobile')}
-              error={form.formState.errors.mobile?.message}
+              {...addForm.register('mobile')}
+              error={addForm.formState.errors.mobile?.message}
             />
           </div>
 
@@ -282,35 +494,124 @@ export default function Candidates() {
               <Input
                 type="number"
                 step="0.5"
-                {...form.register('experience', { valueAsNumber: true })}
-                error={form.formState.errors.experience?.message}
+                min="0"
+                {...addForm.register('experience', { valueAsNumber: true })}
+                error={addForm.formState.errors.experience?.message}
               />
             </div>
             <div>
               <Label>Expected Salary (₹/mo)</Label>
               <Input
                 type="number"
-                {...form.register('expected_salary', { valueAsNumber: true })}
-                error={form.formState.errors.expected_salary?.message}
+                min="0"
+                {...addForm.register('expected_salary', { valueAsNumber: true })}
+                error={addForm.formState.errors.expected_salary?.message}
               />
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Current Salary (₹/mo, Optional)</Label>
+              <Input
+                type="number"
+                min="0"
+                placeholder="e.g. 15000"
+                {...addForm.register('current_salary', { valueAsNumber: true })}
+                error={addForm.formState.errors.current_salary?.message}
+              />
+            </div>
+            <div>
+              <Label>Current Location / City</Label>
+              <Input
+                placeholder="e.g. Raipur"
+                {...addForm.register('location')}
+                error={addForm.formState.errors.location?.message}
+              />
+            </div>
+          </div>
+
+          {/* Qualification Dropdown + Custom Other */}
           <div>
-            <Label>Current Location / City</Label>
-            <Input
-              placeholder="e.g. Raipur"
-              {...form.register('location')}
-              error={form.formState.errors.location?.message}
-            />
+            <Label>Highest Qualification</Label>
+            <select
+              className="w-full text-xs border rounded-md p-2 bg-white"
+              value={addQualSelect}
+              onChange={(e) => setAddQualSelect(e.target.value)}
+            >
+              <option value="">Select Qualification (Optional)...</option>
+              {QUALIFICATION_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            {addQualSelect === 'Other' && (
+              <Input
+                className="mt-1.5"
+                placeholder="Specify custom qualification (e.g. B.Arch, M.Sc Chemistry)"
+                value={addCustomQual}
+                onChange={(e) => setAddCustomQual(e.target.value)}
+              />
+            )}
+          </div>
+
+          {/* Notice Period Dropdown + Custom Other */}
+          <div>
+            <Label>Notice Period</Label>
+            <select
+              className="w-full text-xs border rounded-md p-2 bg-white"
+              value={addNoticeSelect}
+              onChange={(e) => setAddNoticeSelect(e.target.value)}
+            >
+              <option value="">Select Notice Period (Optional)...</option>
+              {NOTICE_PERIOD_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            {addNoticeSelect === 'Other' && (
+              <Input
+                className="mt-1.5"
+                placeholder="Specify custom notice period (e.g. 2 Months, Serving Notice)"
+                value={addCustomNotice}
+                onChange={(e) => setAddCustomNotice(e.target.value)}
+              />
+            )}
+          </div>
+
+          {/* Acquisition Source Dropdown + Custom Other */}
+          <div>
+            <Label>Acquisition Source</Label>
+            <select
+              className="w-full text-xs border rounded-md p-2 bg-white"
+              value={addSourceSelect}
+              onChange={(e) => setAddSourceSelect(e.target.value)}
+            >
+              <option value="">Select Acquisition Source (Optional)...</option>
+              {ACQUISITION_SOURCE_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            {addSourceSelect === 'Other' && (
+              <Input
+                className="mt-1.5"
+                placeholder="Specify custom source (e.g. Job Fair, Newspaper Ad)"
+                value={addCustomSource}
+                onChange={(e) => setAddCustomSource(e.target.value)}
+              />
+            )}
           </div>
 
           <div>
             <Label>Previous Role / Profile</Label>
             <Input
               placeholder="e.g. Accountant, Telecaller, Sales"
-              {...form.register('last_role')}
-              error={form.formState.errors.last_role?.message}
+              {...addForm.register('last_role')}
+              error={addForm.formState.errors.last_role?.message}
             />
           </div>
 
@@ -318,14 +619,253 @@ export default function Candidates() {
             <Label>Skills (Comma-separated)</Label>
             <Input
               placeholder="Excel, Tally, Billing, Sales"
-              {...form.register('skills')}
-              error={form.formState.errors.skills?.message}
+              {...addForm.register('skills')}
+              error={addForm.formState.errors.skills?.message}
             />
           </div>
 
-          <Button type="submit" className="w-full mt-3" disabled={form.formState.isSubmitting}>
-            {form.formState.isSubmitting ? 'Registering...' : 'Register Candidate'}
+          <div>
+            <Label>Email (Optional)</Label>
+            <Input
+              type="email"
+              placeholder="rahul@example.com"
+              {...addForm.register('email')}
+              error={addForm.formState.errors.email?.message}
+            />
+          </div>
+
+          <div>
+            <Label>Notes (Optional)</Label>
+            <Input
+              placeholder="Candidate background, preferences, etc."
+              {...addForm.register('notes')}
+              error={addForm.formState.errors.notes?.message}
+            />
+          </div>
+
+          <Button type="submit" className="w-full mt-3" disabled={addForm.formState.isSubmitting}>
+            {addForm.formState.isSubmitting ? 'Registering...' : 'Register Candidate'}
           </Button>
+        </form>
+      </Modal>
+
+      {/* Edit Candidate Modal */}
+      <Modal
+        isOpen={isEditOpen}
+        onClose={() => {
+          setIsEditOpen(false);
+          setEditingCandidate(null);
+        }}
+        title={`Edit Candidate: ${editingCandidate?.name || ''}`}
+      >
+        <form onSubmit={editForm.handleSubmit(onSubmitEditCandidate)} className="space-y-3">
+          <div>
+            <Label>Full Name</Label>
+            <Input
+              placeholder="e.g. Rahul Sharma"
+              {...editForm.register('name')}
+              error={editForm.formState.errors.name?.message}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Mobile Number</Label>
+              <Input
+                type="tel"
+                placeholder="9876543210"
+                {...editForm.register('mobile')}
+                error={editForm.formState.errors.mobile?.message}
+              />
+            </div>
+            <div>
+              <Label>Candidate Status</Label>
+              <select
+                className="w-full text-xs border rounded-md p-2 bg-white"
+                {...editForm.register('status')}
+              >
+                <option value="Active">Active</option>
+                <option value="Placed">Placed</option>
+                <option value="Blacklisted">Blacklisted</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Experience (Years)</Label>
+              <Input
+                type="number"
+                step="0.5"
+                min="0"
+                {...editForm.register('experience', { valueAsNumber: true })}
+                error={editForm.formState.errors.experience?.message}
+              />
+            </div>
+            <div>
+              <Label>Expected Salary (₹/mo)</Label>
+              <Input
+                type="number"
+                min="0"
+                {...editForm.register('expected_salary', { valueAsNumber: true })}
+                error={editForm.formState.errors.expected_salary?.message}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Current Salary (₹/mo, Optional)</Label>
+              <Input
+                type="number"
+                min="0"
+                placeholder="e.g. 15000"
+                {...editForm.register('current_salary', { valueAsNumber: true })}
+                error={editForm.formState.errors.current_salary?.message}
+              />
+            </div>
+            <div>
+              <Label>Current Location / City</Label>
+              <Input
+                placeholder="e.g. Raipur"
+                {...editForm.register('location')}
+                error={editForm.formState.errors.location?.message}
+              />
+            </div>
+          </div>
+
+          {/* Qualification Dropdown + Custom Other */}
+          <div>
+            <Label>Highest Qualification</Label>
+            <select
+              className="w-full text-xs border rounded-md p-2 bg-white"
+              value={editQualSelect}
+              onChange={(e) => setEditQualSelect(e.target.value)}
+            >
+              <option value="">Select Qualification (Optional)...</option>
+              {QUALIFICATION_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            {editQualSelect === 'Other' && (
+              <Input
+                className="mt-1.5"
+                placeholder="Specify custom qualification"
+                value={editCustomQual}
+                onChange={(e) => setEditCustomQual(e.target.value)}
+              />
+            )}
+          </div>
+
+          {/* Notice Period Dropdown + Custom Other */}
+          <div>
+            <Label>Notice Period</Label>
+            <select
+              className="w-full text-xs border rounded-md p-2 bg-white"
+              value={editNoticeSelect}
+              onChange={(e) => setEditNoticeSelect(e.target.value)}
+            >
+              <option value="">Select Notice Period (Optional)...</option>
+              {NOTICE_PERIOD_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            {editNoticeSelect === 'Other' && (
+              <Input
+                className="mt-1.5"
+                placeholder="Specify custom notice period"
+                value={editCustomNotice}
+                onChange={(e) => setEditCustomNotice(e.target.value)}
+              />
+            )}
+          </div>
+
+          {/* Acquisition Source Dropdown + Custom Other */}
+          <div>
+            <Label>Acquisition Source</Label>
+            <select
+              className="w-full text-xs border rounded-md p-2 bg-white"
+              value={editSourceSelect}
+              onChange={(e) => setEditSourceSelect(e.target.value)}
+            >
+              <option value="">Select Acquisition Source (Optional)...</option>
+              {ACQUISITION_SOURCE_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            {editSourceSelect === 'Other' && (
+              <Input
+                className="mt-1.5"
+                placeholder="Specify custom source"
+                value={editCustomSource}
+                onChange={(e) => setEditCustomSource(e.target.value)}
+              />
+            )}
+          </div>
+
+          <div>
+            <Label>Previous Role / Profile</Label>
+            <Input
+              placeholder="e.g. Accountant, Telecaller, Sales"
+              {...editForm.register('last_role')}
+              error={editForm.formState.errors.last_role?.message}
+            />
+          </div>
+
+          <div>
+            <Label>Skills (Comma-separated)</Label>
+            <Input
+              placeholder="Excel, Tally, Billing, Sales"
+              {...editForm.register('skills')}
+              error={editForm.formState.errors.skills?.message}
+            />
+          </div>
+
+          <div>
+            <Label>Email (Optional)</Label>
+            <Input
+              type="email"
+              placeholder="rahul@example.com"
+              {...editForm.register('email')}
+              error={editForm.formState.errors.email?.message}
+            />
+          </div>
+
+          <div>
+            <Label>Notes (Optional)</Label>
+            <Input
+              placeholder="Candidate background, preferences, etc."
+              {...editForm.register('notes')}
+              error={editForm.formState.errors.notes?.message}
+            />
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              className="flex-1"
+              onClick={() => {
+                setIsEditOpen(false);
+                setEditingCandidate(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              className="flex-1"
+              disabled={editForm.formState.isSubmitting}
+            >
+              {editForm.formState.isSubmitting ? 'Saving Changes...' : 'Save Changes'}
+            </Button>
+          </div>
         </form>
       </Modal>
 

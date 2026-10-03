@@ -31,6 +31,40 @@ export const urgencySchema = z.number()
 // ISO datetime string for scheduling
 export const datetimeSchema = z.string().min(1, 'Date & time required');
 
+// Standard Dropdown Options for Wave 2A
+export const QUALIFICATION_OPTIONS = [
+  'Below 10th',
+  '10th Pass',
+  '12th Pass',
+  'Diploma / ITI',
+  'Graduate — B.Com',
+  'Graduate — B.A. / B.Sc / Other',
+  'Graduate — B.Tech / BCA',
+  'Post Graduate — MBA / M.Com / Other',
+  'Other',
+] as const;
+
+export const NOTICE_PERIOD_OPTIONS = [
+  'Immediate',
+  '7 Days',
+  '15 Days',
+  '30 Days',
+  '45 Days',
+  '60 Days',
+  '90 Days',
+  'Other',
+] as const;
+
+export const ACQUISITION_SOURCE_OPTIONS = [
+  'WhatsApp',
+  'Walk-in',
+  'Referral',
+  'Job Portal',
+  'Website',
+  'Social Media',
+  'Other',
+] as const;
+
 // Candidate Form Schema
 export const candidateSchema = z.object({
   name: z.string().min(2, 'Name too short').max(100, 'Name too long'),
@@ -41,7 +75,12 @@ export const candidateSchema = z.object({
   expected_salary: salarySchema,
   last_role: z.string().min(1, 'Last role required').max(100, 'Last role too long'),
   email: z.string().email('Invalid email').optional().or(z.literal('')),
-  notes: z.string().max(1000, 'Notes too long').optional(),
+  qualification: z.string().max(100, 'Qualification too long').optional().or(z.literal('')),
+  notice_period: z.string().max(100, 'Notice period too long').optional().or(z.literal('')),
+  current_salary: z.number().min(0, 'Current salary cannot be negative').max(10000000, 'Salary too high').optional(),
+  source: z.string().max(100, 'Source too long').optional().or(z.literal('')),
+  status: z.enum(['Active', 'Placed', 'Blacklisted']).optional(),
+  notes: z.string().max(1000, 'Notes too long').optional().or(z.literal('')),
 });
 
 // Job Form Schema
@@ -55,7 +94,8 @@ export const jobSchema = z.object({
   salary_max: salarySchema,
   skills_req: z.string().min(1, 'Required skills are required'),
   urgency: urgencySchema,
-  employer_id: z.string().optional(),
+  employer_id: z.string().optional().or(z.literal('')),
+  status: z.enum(['Open', 'Closed']).optional(),
 }).refine(data => data.min_exp <= data.max_exp, {
   message: 'Min experience cannot exceed max experience',
   path: ['max_exp'],
@@ -90,6 +130,7 @@ export const employerSchema = z.object({
   industry: z.string().max(100).optional().or(z.literal('')),
   address: z.string().max(250).optional().or(z.literal('')),
   notes: z.string().max(1000).optional().or(z.literal('')),
+  status: z.enum(['Active', 'Inactive', 'Prospect']).optional(),
 });
 
 // Application Form Schema

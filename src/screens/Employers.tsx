@@ -1,18 +1,21 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { Button, Input, Modal, Label, Badge, CardSkeleton } from '../components/ui';
-import { Plus, Phone, Mail, MapPin, Search } from 'lucide-react';
+import { Plus, Phone, Mail, MapPin, Search, Pencil } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { employerSchema, type EmployerInput } from '../lib/validation';
+import { Employer } from '../types';
 
 export default function Employers() {
-  const { employers, jobs, loading, insert } = useData();
+  const { employers, jobs, loading, insert, update } = useData();
   const [search, setSearch] = useState('');
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editingEmployer, setEditingEmployer] = useState<Employer | null>(null);
 
-  const form = useForm<EmployerInput>({
+  const addForm = useForm<EmployerInput>({
     resolver: zodResolver(employerSchema),
     defaultValues: {
       company_name: '',
@@ -23,6 +26,22 @@ export default function Employers() {
       industry: '',
       address: '',
       notes: '',
+      status: 'Active',
+    },
+  });
+
+  const editForm = useForm<EmployerInput>({
+    resolver: zodResolver(employerSchema),
+    defaultValues: {
+      company_name: '',
+      contact_person: '',
+      phone: '',
+      email: '',
+      location: '',
+      industry: '',
+      address: '',
+      notes: '',
+      status: 'Active',
     },
   });
 
@@ -31,23 +50,72 @@ export default function Employers() {
       e.company_name.toLowerCase().includes(search.toLowerCase()) ||
       e.contact_person.toLowerCase().includes(search.toLowerCase()) ||
       e.phone.includes(search) ||
-      e.location.toLowerCase().includes(search.toLowerCase())
+      e.location.toLowerCase().includes(search.toLowerCase()) ||
+      (e.industry || '').toLowerCase().includes(search.toLowerCase())
     );
   });
 
-  const onSubmitEmployer = async (data: EmployerInput) => {
+  const handleOpenEdit = (emp: Employer) => {
+    setEditingEmployer(emp);
+    editForm.reset({
+      company_name: emp.company_name,
+      contact_person: emp.contact_person,
+      phone: emp.phone,
+      email: emp.email || '',
+      location: emp.location,
+      industry: emp.industry || '',
+      address: emp.address || '',
+      notes: emp.notes || '',
+      status: emp.status || 'Active',
+    });
+    setIsEditOpen(true);
+  };
+
+  const onSubmitAddEmployer = async (data: EmployerInput) => {
     try {
       await insert('employers', {
-        ...data,
-        status: 'Active',
+        company_name: data.company_name.trim(),
+        contact_person: data.contact_person.trim(),
+        phone: data.phone.trim(),
+        email: data.email?.trim() || undefined,
+        location: data.location.trim(),
+        industry: data.industry?.trim() || undefined,
+        address: data.address?.trim() || undefined,
+        notes: data.notes?.trim() || undefined,
+        status: data.status || 'Active',
         is_active: true,
       });
 
       toast.success('Employer added successfully!');
-      form.reset();
+      addForm.reset();
       setIsAddOpen(false);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to add employer');
+    }
+  };
+
+  const onSubmitEditEmployer = async (data: EmployerInput) => {
+    if (!editingEmployer) return;
+
+    try {
+      await update('employers', {
+        id: editingEmployer.id,
+        company_name: data.company_name.trim(),
+        contact_person: data.contact_person.trim(),
+        phone: data.phone.trim(),
+        email: data.email?.trim() || undefined,
+        location: data.location.trim(),
+        industry: data.industry?.trim() || undefined,
+        address: data.address?.trim() || undefined,
+        notes: data.notes?.trim() || undefined,
+        status: data.status || editingEmployer.status,
+      });
+
+      toast.success('Employer updated successfully!');
+      setIsEditOpen(false);
+      setEditingEmployer(null);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update employer');
     }
   };
 
@@ -60,7 +128,7 @@ export default function Employers() {
         </div>
         <Button
           onClick={() => {
-            form.reset();
+            addForm.reset();
             setIsAddOpen(true);
           }}
           className="flex items-center gap-1 text-xs py-1.5 px-3"
@@ -127,17 +195,30 @@ export default function Employers() {
                   )}
                 </div>
 
+                {emp.notes && (
+                  <p className="text-[11px] text-slate-500 italic mt-2 bg-slate-50 p-2 rounded">
+                    {emp.notes}
+                  </p>
+                )}
+
                 <div className="mt-3 pt-2.5 border-t border-slate-100 flex justify-between items-center text-xs">
                   <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
                     {activeJobs.length} Vacanc{activeJobs.length === 1 ? 'y' : 'ies'} Registered
                   </span>
 
-                  <div className="flex gap-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleOpenEdit(emp)}
+                      className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded font-medium hover:bg-slate-200 flex items-center gap-1 text-xs"
+                      title="Edit Employer"
+                    >
+                      <Pencil size={13} /> Edit
+                    </button>
                     <a
                       href={`tel:${emp.phone}`}
-                      className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded font-medium hover:bg-slate-200"
+                      className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded font-medium hover:bg-blue-100 flex items-center gap-1 text-xs"
                     >
-                      Call HR
+                      <Phone size={13} /> Call HR
                     </a>
                   </div>
                 </div>
@@ -149,13 +230,13 @@ export default function Employers() {
 
       {/* Add Employer Modal */}
       <Modal isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} title="Register Employer / Client">
-        <form onSubmit={form.handleSubmit(onSubmitEmployer)} className="space-y-3">
+        <form onSubmit={addForm.handleSubmit(onSubmitAddEmployer)} className="space-y-3">
           <div>
             <Label>Company Name</Label>
             <Input
               placeholder="e.g. Apex Hospital, Shriram Finance"
-              {...form.register('company_name')}
-              error={form.formState.errors.company_name?.message}
+              {...addForm.register('company_name')}
+              error={addForm.formState.errors.company_name?.message}
             />
           </div>
 
@@ -163,8 +244,8 @@ export default function Employers() {
             <Label>HR / Contact Person Name</Label>
             <Input
               placeholder="e.g. Vikash Nayak (HR Manager)"
-              {...form.register('contact_person')}
-              error={form.formState.errors.contact_person?.message}
+              {...addForm.register('contact_person')}
+              error={addForm.formState.errors.contact_person?.message}
             />
           </div>
 
@@ -174,16 +255,16 @@ export default function Employers() {
               <Input
                 type="tel"
                 placeholder="9876543210"
-                {...form.register('phone')}
-                error={form.formState.errors.phone?.message}
+                {...addForm.register('phone')}
+                error={addForm.formState.errors.phone?.message}
               />
             </div>
             <div>
               <Label>Location / City</Label>
               <Input
                 placeholder="Raipur"
-                {...form.register('location')}
-                error={form.formState.errors.location?.message}
+                {...addForm.register('location')}
+                error={addForm.formState.errors.location?.message}
               />
             </div>
           </div>
@@ -193,8 +274,8 @@ export default function Employers() {
             <Input
               type="email"
               placeholder="hr@company.com"
-              {...form.register('email')}
-              error={form.formState.errors.email?.message}
+              {...addForm.register('email')}
+              error={addForm.formState.errors.email?.message}
             />
           </div>
 
@@ -202,8 +283,17 @@ export default function Employers() {
             <Label>Industry / Sector (Optional)</Label>
             <Input
               placeholder="e.g. Manufacturing, Retail, IT, Banking"
-              {...form.register('industry')}
-              error={form.formState.errors.industry?.message}
+              {...addForm.register('industry')}
+              error={addForm.formState.errors.industry?.message}
+            />
+          </div>
+
+          <div>
+            <Label>Address (Optional)</Label>
+            <Input
+              placeholder="e.g. Plot 12, Industrial Area, Ring Road No. 1"
+              {...addForm.register('address')}
+              error={addForm.formState.errors.address?.message}
             />
           </div>
 
@@ -211,14 +301,135 @@ export default function Employers() {
             <Label>Notes / Commercial Terms (Optional)</Label>
             <Input
               placeholder="e.g. 8.33% billing fee, 30 days credit"
-              {...form.register('notes')}
-              error={form.formState.errors.notes?.message}
+              {...addForm.register('notes')}
+              error={addForm.formState.errors.notes?.message}
             />
           </div>
 
-          <Button type="submit" className="w-full mt-3" disabled={form.formState.isSubmitting}>
-            {form.formState.isSubmitting ? 'Saving...' : 'Register Employer'}
+          <Button type="submit" className="w-full mt-3" disabled={addForm.formState.isSubmitting}>
+            {addForm.formState.isSubmitting ? 'Saving...' : 'Register Employer'}
           </Button>
+        </form>
+      </Modal>
+
+      {/* Edit Employer Modal */}
+      <Modal
+        isOpen={isEditOpen}
+        onClose={() => {
+          setIsEditOpen(false);
+          setEditingEmployer(null);
+        }}
+        title={`Edit Employer: ${editingEmployer?.company_name || ''}`}
+      >
+        <form onSubmit={editForm.handleSubmit(onSubmitEditEmployer)} className="space-y-3">
+          <div>
+            <Label>Company Name</Label>
+            <Input
+              placeholder="e.g. Apex Hospital, Shriram Finance"
+              {...editForm.register('company_name')}
+              error={editForm.formState.errors.company_name?.message}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>HR / Contact Person Name</Label>
+              <Input
+                placeholder="e.g. Vikash Nayak (HR Manager)"
+                {...editForm.register('contact_person')}
+                error={editForm.formState.errors.contact_person?.message}
+              />
+            </div>
+            <div>
+              <Label>Client Status</Label>
+              <select
+                className="w-full text-xs border rounded-md p-2 bg-white"
+                {...editForm.register('status')}
+              >
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+                <option value="Prospect">Prospect</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Mobile / Phone</Label>
+              <Input
+                type="tel"
+                placeholder="9876543210"
+                {...editForm.register('phone')}
+                error={editForm.formState.errors.phone?.message}
+              />
+            </div>
+            <div>
+              <Label>Location / City</Label>
+              <Input
+                placeholder="Raipur"
+                {...editForm.register('location')}
+                error={editForm.formState.errors.location?.message}
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label>Email (Optional)</Label>
+            <Input
+              type="email"
+              placeholder="hr@company.com"
+              {...editForm.register('email')}
+              error={editForm.formState.errors.email?.message}
+            />
+          </div>
+
+          <div>
+            <Label>Industry / Sector (Optional)</Label>
+            <Input
+              placeholder="e.g. Manufacturing, Retail, IT, Banking"
+              {...editForm.register('industry')}
+              error={editForm.formState.errors.industry?.message}
+            />
+          </div>
+
+          <div>
+            <Label>Address (Optional)</Label>
+            <Input
+              placeholder="e.g. Plot 12, Industrial Area, Ring Road No. 1"
+              {...editForm.register('address')}
+              error={editForm.formState.errors.address?.message}
+            />
+          </div>
+
+          <div>
+            <Label>Notes / Commercial Terms (Optional)</Label>
+            <Input
+              placeholder="e.g. 8.33% billing fee, 30 days credit"
+              {...editForm.register('notes')}
+              error={editForm.formState.errors.notes?.message}
+            />
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              className="flex-1"
+              onClick={() => {
+                setIsEditOpen(false);
+                setEditingEmployer(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              className="flex-1"
+              disabled={editForm.formState.isSubmitting}
+            >
+              {editForm.formState.isSubmitting ? 'Saving Changes...' : 'Save Changes'}
+            </Button>
+          </div>
         </form>
       </Modal>
     </div>

@@ -11,6 +11,10 @@ export interface Candidate {
   last_role: string;
   status: 'Active' | 'Placed' | 'Blacklisted';
   registration_fee_paid?: boolean;
+  qualification?: string;
+  notice_period?: string;
+  current_salary?: number;
+  source?: string;
   notes?: string;
   owner_id: string;
   is_active: boolean;
