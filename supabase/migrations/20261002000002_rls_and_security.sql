@@ -90,8 +90,7 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
+CREATE OR REPLACE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
@@ -128,8 +127,7 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_profiles_update_safety ON public.profiles;
-CREATE TRIGGER trg_profiles_update_safety
+CREATE OR REPLACE TRIGGER trg_profiles_update_safety
   BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.trg_check_profile_update();
 
@@ -160,8 +158,7 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_candidates_ownership_safety ON public.candidates;
-CREATE TRIGGER trg_candidates_ownership_safety
+CREATE OR REPLACE TRIGGER trg_candidates_ownership_safety
   BEFORE UPDATE ON public.candidates
   FOR EACH ROW EXECUTE FUNCTION public.trg_enforce_candidate_ownership();
 
@@ -186,8 +183,7 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_applications_ownership_safety ON public.job_applications;
-CREATE TRIGGER trg_applications_ownership_safety
+CREATE OR REPLACE TRIGGER trg_applications_ownership_safety
   BEFORE UPDATE ON public.job_applications
   FOR EACH ROW EXECUTE FUNCTION public.trg_enforce_application_ownership();
 
@@ -205,8 +201,7 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_interviews_ownership_safety ON public.interviews;
-CREATE TRIGGER trg_interviews_ownership_safety
+CREATE OR REPLACE TRIGGER trg_interviews_ownership_safety
   BEFORE UPDATE ON public.interviews
   FOR EACH ROW EXECUTE FUNCTION public.trg_enforce_interview_ownership();
 
