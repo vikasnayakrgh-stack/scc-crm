@@ -492,3 +492,52 @@ CREATE POLICY "activity_logs_select_policy" ON public.activity_logs
 
 -- No INSERT, UPDATE, DELETE policies for client API on activity_logs
 -- Writes happen strictly via server-side triggers or service-role backend
+
+-- ====================================================================
+-- 16. Explicit Table-Level GRANTs (CRITICAL for Supabase Cloud)
+-- In fresh Supabase cloud projects, PostgREST requires explicit GRANTs
+-- on tables for the authenticated role. RLS policies alone are NOT
+-- sufficient — without GRANTs the API denies the request before
+-- RLS is even evaluated, returning silent 403/empty results.
+-- ====================================================================
+
+-- profiles: anon needs SELECT to validate login state; authenticated manages own profile
+GRANT SELECT ON public.profiles TO anon;
+GRANT SELECT, UPDATE ON public.profiles TO authenticated;
+
+-- employers: full CRUD for authenticated (RLS restricts by role/ownership)
+GRANT SELECT, INSERT, UPDATE ON public.employers TO authenticated;
+
+-- candidates: full CRUD for authenticated
+GRANT SELECT, INSERT, UPDATE ON public.candidates TO authenticated;
+
+-- jobs: full CRUD for authenticated
+GRANT SELECT, INSERT, UPDATE ON public.jobs TO authenticated;
+
+-- job_applications: full CRUD for authenticated
+GRANT SELECT, INSERT, UPDATE ON public.job_applications TO authenticated;
+
+-- applications view: SELECT for authenticated (read-through to job_applications)
+GRANT SELECT ON public.applications TO authenticated;
+
+-- interviews: full CRUD for authenticated
+GRANT SELECT, INSERT, UPDATE ON public.interviews TO authenticated;
+
+-- call_logs: INSERT + SELECT only (immutable telecaller trail — no UPDATE/DELETE)
+GRANT SELECT, INSERT ON public.call_logs TO authenticated;
+
+-- tasks: full CRUD for authenticated
+GRANT SELECT, INSERT, UPDATE ON public.tasks TO authenticated;
+
+-- payment_records: full CRUD except DELETE (financial audit trail)
+GRANT SELECT, INSERT, UPDATE ON public.payment_records TO authenticated;
+
+-- payments view: SELECT for authenticated (read-through to payment_records)
+GRANT SELECT ON public.payments TO authenticated;
+
+-- activity_logs: SELECT only for authenticated (admin-gated by RLS policy)
+GRANT SELECT ON public.activity_logs TO authenticated;
+
+-- Sequence permissions (needed for DEFAULT gen_random_uuid() to work via API)
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO anon;
