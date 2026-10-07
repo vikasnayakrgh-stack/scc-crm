@@ -104,16 +104,30 @@ export interface Interview {
   applications?: Application;
 }
 
+export type CallType =
+  | 'Connected'
+  | 'Busy'
+  | 'SwitchOff'
+  | 'No Answer'
+  | 'Not Interested'
+  | 'Wrong Number'
+  | 'Call Back Later'
+  | 'Interested'
+  | 'Converted';
+
 export interface CallLog {
   id: string;
-  candidate_id: string;
+  candidate_id?: string | null;
+  lead_id?: string | null;
   telecaller_name: string;
-  call_type: 'Connected' | 'Busy' | 'SwitchOff';
+  call_type: CallType;
   duration: number;
   note: string;
   timestamp: string;
+  created_by?: string | null;
   // Joins for UI
   candidates?: Candidate;
+  leads?: Lead;
 }
 
 export interface FollowUpTask {
@@ -122,13 +136,103 @@ export interface FollowUpTask {
   due_date: string;
   title: string;
   notes?: string;
-  entity_type: 'candidate' | 'employer' | 'application';
+  entity_type: 'candidate' | 'employer' | 'application' | 'general' | 'lead';
   entity_id: string;
+  lead_entity_id?: string | null;
+  candidate_entity_id?: string | null;
+  employer_entity_id?: string | null;
+  application_entity_id?: string | null;
   assigned_to: string;
+  assigned_to_user_id?: string | null;
+  created_by?: string | null;
   priority: 'Low' | 'Medium' | 'High';
   status: 'Pending' | 'Completed' | 'Cancelled';
   completed_at?: string;
   is_active: boolean;
+  // Joins
+  leads?: Lead;
+  candidates?: Candidate;
+}
+
+export type LeadCategory =
+  | 'New'
+  | 'Hot'
+  | 'Warm'
+  | 'Cold'
+  | 'Converted'
+  | 'Rejected'
+  | 'Do Not Contact';
+
+export type LeadSource =
+  | 'WorkIndia'
+  | 'Naukri.com'
+  | 'Indeed'
+  | 'LinkedIn'
+  | 'WhatsApp'
+  | 'Walk-in'
+  | 'Referral'
+  | 'Website'
+  | 'Manual'
+  | 'Other';
+
+export interface Lead {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  name: string;
+  mobile: string;
+  email?: string | null;
+  experience?: number | null;
+  skills: string[];
+  location?: string | null;
+  expected_salary?: number | null;
+  current_salary?: number | null;
+  qualification?: string | null;
+  notice_period?: string | null;
+  last_role?: string | null;
+  source: LeadSource;
+  category: LeadCategory;
+  assigned_to?: string | null;
+  import_batch_id?: string | null;
+  converted_candidate_id?: string | null;
+  converted_at?: string | null;
+  converted_by?: string | null;
+  created_by?: string | null;
+  notes?: string | null;
+  is_active: boolean;
+  // UI Joins
+  assigned_profile?: UserProfile;
+}
+
+export interface LeadImportBatch {
+  id: string;
+  created_at: string;
+  imported_by: string;
+  file_name: string;
+  file_hash?: string | null;
+  detected_platform: 'Naukri.com' | 'WorkIndia' | 'Generic';
+  total_rows: number;
+  imported_count: number;
+  skipped_duplicate_count: number;
+  skipped_invalid_count: number;
+  default_assigned_to?: string | null;
+  notes?: string | null;
+  // UI Joins
+  imported_by_profile?: UserProfile;
+}
+
+export interface LeadAssignmentHistory {
+  id: string;
+  created_at: string;
+  lead_id: string;
+  assigned_from?: string | null;
+  assigned_to?: string | null;
+  assigned_by: string;
+  reason?: string | null;
+  // UI Joins
+  assigned_from_profile?: UserProfile;
+  assigned_to_profile?: UserProfile;
+  assigned_by_profile?: UserProfile;
 }
 
 export interface PaymentRecord {

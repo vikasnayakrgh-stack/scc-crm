@@ -114,10 +114,22 @@ export const interviewSchema = z.object({
 
 // Call Log Schema
 export const callLogSchema = z.object({
-  candidate_id: z.string().min(1, 'Candidate required'),
-  call_type: z.enum(['Connected', 'Busy', 'SwitchOff']),
+  candidate_id: z.string().optional().or(z.literal('')),
+  lead_id: z.string().optional().or(z.literal('')),
+  call_type: z.enum([
+    'Connected', 'Busy', 'SwitchOff',
+    'No Answer', 'Not Interested', 'Wrong Number',
+    'Call Back Later', 'Interested', 'Converted'
+  ]),
   duration: z.coerce.number().min(0).default(0),
   note: z.string().max(500, 'Note too long').optional(),
+}).refine(data => {
+  const hasCand = Boolean(data.candidate_id && data.candidate_id.trim());
+  const hasLead = Boolean(data.lead_id && data.lead_id.trim());
+  return (hasCand && !hasLead) || (!hasCand && hasLead);
+}, {
+  message: 'Call log must be linked to either a candidate or a lead',
+  path: ['candidate_id'],
 });
 
 // Employer Form Schema
@@ -161,10 +173,14 @@ export const applicationSchema = z.object({
 export const taskSchema = z.object({
   title: z.string().min(3, 'Title required').max(150),
   due_date: z.string().min(1, 'Due date required'),
-  entity_type: z.enum(['candidate', 'employer', 'application']),
+  entity_type: z.enum(['candidate', 'employer', 'application', 'general', 'lead']),
   entity_id: z.string().min(1, 'Linked entity required'),
+  lead_entity_id: z.string().optional().nullable(),
   priority: z.enum(['Low', 'Medium', 'High']).default('Medium'),
   notes: z.string().max(500).optional().or(z.literal('')),
+}).refine(data => data.entity_type !== 'lead' || Boolean(data.lead_entity_id && data.lead_entity_id.trim()), {
+  message: 'Lead tasks must include a valid lead_entity_id',
+  path: ['lead_entity_id'],
 });
 
 // Payment Form Schema
@@ -178,6 +194,30 @@ export const paymentSchema = z.object({
   notes: z.string().max(500).optional().or(z.literal('')),
 });
 
+// Lead Form Schema
+export const leadSchema = z.object({
+  name: z.string().min(2, 'Name required').max(100),
+  mobile: phoneSchema,
+  email: z.string().email('Invalid email').optional().or(z.literal('')),
+  experience: z.coerce.number().min(0).max(50).optional().nullable(),
+  skills: z.array(z.string()).default([]),
+  location: z.string().max(100).optional().nullable(),
+  expected_salary: salarySchema.optional().nullable(),
+  current_salary: salarySchema.optional().nullable(),
+  qualification: z.string().max(100).optional().nullable(),
+  notice_period: z.string().max(50).optional().nullable(),
+  last_role: z.string().max(100).optional().nullable(),
+  source: z.enum([
+    'WorkIndia', 'Naukri.com', 'Indeed', 'LinkedIn',
+    'WhatsApp', 'Walk-in', 'Referral', 'Website', 'Manual', 'Other'
+  ]).default('Manual'),
+  category: z.enum([
+    'New', 'Hot', 'Warm', 'Cold', 'Converted', 'Rejected', 'Do Not Contact'
+  ]).default('New'),
+  assigned_to: z.string().optional().nullable(),
+  notes: z.string().max(1000).optional().nullable(),
+});
+
 // Type inference
 export type CandidateInput = z.infer<typeof candidateSchema>;
 export type JobInput = z.infer<typeof jobSchema>;
@@ -187,3 +227,4 @@ export type EmployerInput = z.infer<typeof employerSchema>;
 export type ApplicationInput = z.infer<typeof applicationSchema>;
 export type TaskInput = z.infer<typeof taskSchema>;
 export type PaymentInput = z.infer<typeof paymentSchema>;
+export type LeadInput = z.infer<typeof leadSchema>;

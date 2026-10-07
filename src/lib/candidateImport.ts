@@ -163,8 +163,16 @@ export function normalizePhone(raw: any): { isValid: boolean; normalized: string
     return { isValid: false, normalized: '', reason: 'Phone contains no digits' };
   }
 
+  // Handle 0091 country code (14 digits)
+  if (digits.length === 14 && digits.startsWith('0091')) {
+    digits = digits.slice(4);
+  }
+  // Handle +910 or 910 country code with leading zero (13 digits)
+  else if (digits.length === 13 && digits.startsWith('910')) {
+    digits = digits.slice(3);
+  }
   // Handle +91 or 91 country code (12 digits)
-  if (digits.length === 12 && digits.startsWith('91')) {
+  else if (digits.length === 12 && digits.startsWith('91')) {
     digits = digits.slice(2);
   }
   // Handle leading 0 (11 digits e.g. 09876543210)

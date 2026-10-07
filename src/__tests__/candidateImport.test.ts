@@ -44,6 +44,18 @@ describe('Candidate Import Engine', () => {
       expect(res.normalized).toBe('9876543210');
     });
 
+    it('handles 0091 international prefix (00919876543210)', () => {
+      const res = normalizePhone('00919876543210');
+      expect(res.isValid).toBe(true);
+      expect(res.normalized).toBe('9876543210');
+    });
+
+    it('handles +91 with leading zero (+91 09876543210)', () => {
+      const res = normalizePhone('+91 09876543210');
+      expect(res.isValid).toBe(true);
+      expect(res.normalized).toBe('9876543210');
+    });
+
     it('rejects numbers not starting with 6, 7, 8, 9', () => {
       const res = normalizePhone('5555555555');
       expect(res.isValid).toBe(false);

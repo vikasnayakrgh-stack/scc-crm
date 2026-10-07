@@ -16,7 +16,8 @@ import {
   Shield,
   WifiOff,
   RefreshCw,
-  X
+  X,
+  Flame,
 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
 import { useData } from '../context/DataContext';
@@ -36,11 +37,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setMobileOpen,
 }) => {
   const { currentUser, appRole } = useUser();
-  const { candidates, jobs, interviews, tasks, isOffline, pendingCount } = useData();
+  const { candidates, jobs, interviews, tasks, leads, callLogs, isOffline, pendingCount } = useData();
 
   const now = new Date();
 
   // Dynamic badge counts for situational awareness
+  // Hot leads = active leads with 0 recorded call attempts
+  const calledLeadIds = new Set(callLogs.filter((c) => c.lead_id).map((c) => c.lead_id));
+  const hotLeadsCount = leads.filter(
+    (l) => l.is_active && !calledLeadIds.has(l.id) && l.category !== 'Converted'
+  ).length;
+
   const todayInterviewsCount = interviews.filter((i) => {
     try {
       return isSameDay(parseISO(i.scheduled_time), now) && i.status === 'Scheduled';
@@ -71,6 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       title: 'RECRUITMENT',
       items: [
+        { to: '/leads', label: 'Leads', icon: Flame, badge: hotLeadsCount > 0 ? hotLeadsCount : undefined, badgeColor: 'bg-rose-100 text-rose-700' },
         { to: '/candidates', label: 'Candidates', icon: Users, badge: candidates.length },
         { to: '/employers', label: 'Clients / Employers', icon: Building2 },
         { to: '/jobs', label: 'Jobs', icon: Briefcase, badge: openJobsCount > 0 ? openJobsCount : undefined },

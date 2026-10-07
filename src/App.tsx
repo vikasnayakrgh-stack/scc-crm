@@ -8,6 +8,7 @@ import { Layout } from './components/Layout';
 
 import Dashboard from './screens/Dashboard';
 import Candidates from './screens/Candidates';
+import Leads from './screens/Leads';
 import Employers from './screens/Employers';
 import Jobs from './screens/Jobs';
 import Applications from './screens/Applications';
@@ -21,6 +22,7 @@ function AppContent() {
     <Layout>
       <Routes>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/leads" element={<Leads />} />
         <Route path="/candidates" element={<Candidates />} />
         <Route path="/employers" element={<Employers />} />
         <Route path="/jobs" element={<Jobs />} />
