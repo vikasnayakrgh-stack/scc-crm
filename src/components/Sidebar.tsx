@@ -97,6 +97,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       title: 'MANAGEMENT',
       items: [
         { to: '/payments', label: 'Payments', icon: IndianRupee },
+        ...(appRole === 'admin'
+          ? [{ to: '/users', label: 'User Management', icon: Shield }]
+          : []),
         { to: '/activities', label: 'Settings', icon: Settings },
       ],
     },

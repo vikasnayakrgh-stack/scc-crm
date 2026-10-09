@@ -41,6 +41,48 @@
 
 ## Historical Changelog
 
+### [2026-10-09] Secure Admin User Management Module Implementation
+- **Task Reference:** SCC CRM — Secure Admin User Management Implementation
+- **Agent Model / ID:** Senior Full-Stack Engineer & Supabase Security Architect
+- **Scope:** Full-Stack User Management, Hardened RPCs, Migration 010, Anti-Lockout Guards, Vitest Test Suite
+
+#### 1. Rationale & Problem Description
+- Administrators needed self-contained user management without using Supabase dashboard directly:
+  - Create staff users with custom credentials and roles (`admin`, `manager`, `recruiter`).
+  - View all registered staff (including deactivated users, which required updating `profiles_select_policy`).
+  - Update user profile details (`display_name`, `phone`).
+  - Modify user roles with last-admin lockout prevention.
+  - Deactivate or reactivate accounts, immediately terminating access while preserving historical attribution on leads, candidate logs, and placement invoices.
+  - Reset user passwords (direct temporary credentials or email recovery links).
+  - Inspect user management audit trails in `public.activity_logs`.
+- Security invariants strictly upheld: Zero service-role keys bundled on client, all mutations routed through hardened `SECURITY DEFINER` routines with explicit `SET search_path = public, pg_catalog`.
+
+#### 2. Affected Files
+- `supabase/migrations/20261009000010_user_management_module.sql` (Created)
+- `supabase/functions/admin-create-user/index.ts` (Created)
+- `src/lib/userManagement.ts` (Created)
+- `src/screens/UserManagement.tsx` (Created)
+- `src/__tests__/userManagement.test.ts` (Created)
+- `SCC_USER_MANAGEMENT_IMPLEMENTATION_REPORT.md` (Created)
+- `src/components/Sidebar.tsx` (Modified - Added User Management link guarded by `appRole === 'admin'`)
+- `src/App.tsx` (Modified - Registered `/users` route)
+- `docs/agent/CHANGELOG.md` (Modified)
+
+#### 3. Architectural & Business Invariants Impacted
+- **No Service Role on Frontend:** Only public anon key used by browser bundle.
+- **Enhanced Profiles RLS:** `USING (is_active = true OR public.is_admin())` gives admins visibility over deactivated users while maintaining active user isolation.
+- **Last Active Admin Protection:** Enforced at both database trigger (`trg_check_profile_update`) and UI service layer.
+- **Account Deactivation Safety:** Soft deactivation (`is_active = false`) ensures historical call logs and candidate records retain immutable attribution.
+
+#### 4. Verification & Testing Evidence
+- **Automated Tests:**
+  - `npm test -- userManagement.test.ts` -> 20/20 passed (36ms).
+  - `npm test` -> 266 passed across 16 test files (0 failures).
+- **TypeScript Strictness:** Clean compilation (`tsc --noEmit`).
+- **Build Verification:** `npm run build` -> `built in 3m 26s` with zero errors.
+
+---
+
 ### [2026-10-09] Final Pre-Release Defect Correction: Refund Accounting, Screening RLS, Offline Queue Recovery & Test Modernization
 - **Task Reference:** SCC CRM — Final Pre-Release Defect Correction
 - **Agent Model / ID:** Principal Supabase/PostgreSQL Engineer, QA Architect & Full-Stack Specialist

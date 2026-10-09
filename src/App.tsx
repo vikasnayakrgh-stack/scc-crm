@@ -16,6 +16,7 @@ import Interviews from './screens/Interviews';
 import Tasks from './screens/Tasks';
 import Payments from './screens/Payments';
 import Activities from './screens/Activities';
+import UserManagement from './screens/UserManagement';
 
 import { useAuth } from './context/AuthContext';
 import { isSupabaseConfigured } from './lib/supabaseClient';
@@ -101,6 +102,7 @@ function AppContent() {
         <Route path="/interviews" element={<Interviews />} />
         <Route path="/tasks" element={<Tasks />} />
         <Route path="/payments" element={<Payments />} />
+        <Route path="/users" element={<UserManagement />} />
         <Route path="/activities" element={<Activities />} />
       </Routes>
     </Layout>
