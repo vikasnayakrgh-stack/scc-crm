@@ -17,7 +17,30 @@ import Tasks from './screens/Tasks';
 import Payments from './screens/Payments';
 import Activities from './screens/Activities';
 
+import { useAuth } from './context/AuthContext';
+import { isSupabaseConfigured } from './lib/supabaseClient';
+import Login from './screens/Login';
+
 function AppContent() {
+  const { user, loading } = useAuth();
+
+  // Production Auth Guard: Enforce authentication when Supabase is configured
+  if (isSupabaseConfigured) {
+    if (loading) {
+      return (
+        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4">
+          <div className="w-10 h-10 border-3 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
+          <p className="text-sm font-semibold text-slate-200">Verifying secure session...</p>
+          <p className="text-xs text-slate-400 mt-1">Shree Career Consultancy • SCC CRM</p>
+        </div>
+      );
+    }
+
+    if (!user) {
+      return <Login />;
+    }
+  }
+
   return (
     <Layout>
       <Routes>

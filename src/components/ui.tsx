@@ -186,6 +186,71 @@ export const Modal: React.FC<{
   );
 };
 
+export const Drawer: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  title: React.ReactNode;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  width?: 'md' | 'lg' | 'xl' | '2xl' | '3xl';
+}> = ({ isOpen, onClose, title, children, footer, width = 'xl' }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleEsc);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', handleEsc);
+      document.body.style.overflow = '';
+    };
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
+
+  const widthStyles = {
+    md: 'max-w-md',
+    lg: 'max-w-lg',
+    xl: 'max-w-xl',
+    '2xl': 'max-w-2xl',
+    '3xl': 'max-w-3xl',
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-slate-900/50 backdrop-blur-xs transition-opacity duration-200"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className={`bg-white h-full w-full ${widthStyles[width]} shadow-2xl border-l border-slate-200 flex flex-col overflow-hidden animate-in slide-in-from-right duration-200`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-center px-5 py-4 border-b border-slate-100 bg-slate-50/70 shrink-0">
+          <div className="text-base font-bold text-slate-800 tracking-tight flex-1 pr-3">
+            {title}
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors"
+            aria-label="Close drawer"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="p-5 overflow-y-auto space-y-5 flex-1 bg-white">{children}</div>
+        {footer && (
+          <div className="px-5 py-3.5 border-t border-slate-100 bg-slate-50/80 shrink-0 flex items-center justify-between gap-3">
+            {footer}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export const Card: React.FC<{
   children: React.ReactNode;
   className?: string;

@@ -293,6 +293,7 @@ export const processOfflineQueue = async (
     baseDelayMs?: number;
     maxDelayMs?: number;
     skipBackoffCheck?: boolean;
+    onProgress?: () => Promise<void> | void;
   }
 ): Promise<{ processed: number; failed: number; deadLettered: number }> => {
   if (isProcessingQueue) return { processed: 0, failed: 0, deadLettered: 0 };
@@ -324,10 +325,16 @@ export const processOfflineQueue = async (
         if (!error) {
           await removeQueuedMutation(mutation.id);
           processed++;
+          if (options?.onProgress) {
+            try { await options.onProgress(); } catch {}
+          }
         } else if (isPermanentError(error)) {
           // Permanent constraint error -> Move to Dead Letter Queue to avoid head-of-line blocking!
           await moveToDeadLetterQueue(mutation, error.message || 'Constraint error');
           deadLettered++;
+          if (options?.onProgress) {
+            try { await options.onProgress(); } catch {}
+          }
         } else {
           // Transient network/timeout error -> Exponential backoff retry with persistence
           const { dlq } = await handleTransientRetry(mutation, error.message || 'Network error', now);
@@ -336,17 +343,26 @@ export const processOfflineQueue = async (
           } else {
             failed++;
           }
+          if (options?.onProgress) {
+            try { await options.onProgress(); } catch {}
+          }
         }
       } catch (err: any) {
         if (isPermanentError(err)) {
           await moveToDeadLetterQueue(mutation, err?.message || 'Execution error');
           deadLettered++;
+          if (options?.onProgress) {
+            try { await options.onProgress(); } catch {}
+          }
         } else {
           const { dlq } = await handleTransientRetry(mutation, err?.message || 'Execution error', now);
           if (dlq) {
             deadLettered++;
           } else {
             failed++;
+          }
+          if (options?.onProgress) {
+            try { await options.onProgress(); } catch {}
           }
         }
       }

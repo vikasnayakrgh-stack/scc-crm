@@ -88,15 +88,20 @@ export interface Application {
   jobs?: Job;
 }
 
+export type InterviewStatus = 'Scheduled' | 'Done' | 'NoShow' | 'Selected' | 'Rejected' | 'On Hold';
+
 export interface Interview {
   id: string;
   created_at: string;
+  updated_at?: string;
   candidate_id: string;
   job_id: string;
   application_id?: string;
   scheduled_time: string;
-  status: 'Scheduled' | 'Done' | 'NoShow' | 'Selected';
-  feedback: string;
+  status: InterviewStatus;
+  feedback: string; // Interview Remarks / Feedback
+  rating?: number | null; // Rating: ⭐ 1-5
+  next_action?: string | null;
   is_active: boolean;
   // Joins for UI
   candidates?: Candidate;

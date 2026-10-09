@@ -13,22 +13,26 @@ import {
   X,
   Phone,
   Calendar,
-  ExternalLink
+  ExternalLink,
+  LogIn,
+  LogOut
 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
+import { isSupabaseConfigured } from '../lib/supabaseClient';
 import { USERS, UserRole } from '../types';
 
 interface HeaderProps {
   onOpenMobileMenu: () => void;
+  onOpenSignIn?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenMobileMenu }) => {
+export const Header: React.FC<HeaderProps> = ({ onOpenMobileMenu, onOpenSignIn }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { currentUser, setCurrentUser, appRole, displayName, userEmail } = useUser();
-  const { user: authUser, profile } = useAuth();
+  const { user: authUser, profile, signOut } = useAuth();
   const { candidates, jobs, tasks } = useData();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -319,10 +323,10 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileMenu }) => {
             </div>
             <div className="hidden lg:flex flex-col text-left">
               <span className="text-xs font-bold text-slate-800 leading-tight">
-                {displayName || currentUser}
+                {profile?.display_name || displayName || currentUser}
               </span>
               <span className="text-[10px] text-slate-400 capitalize font-medium">
-                {appRole || (currentUser === 'Admin' ? 'Admin' : 'Recruiter')}
+                {profile?.role || appRole || (currentUser === 'Admin' ? 'Admin' : 'Recruiter')}
               </span>
             </div>
             <ChevronDown size={14} className="text-slate-400 hidden sm:block" />
@@ -332,27 +336,31 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileMenu }) => {
           {userDropdownOpen && (
             <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-100 p-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
               <div className="px-3 py-2 border-b border-slate-100 mb-1">
-                <p className="font-bold text-slate-900">{displayName || currentUser}</p>
-                <p className="text-[11px] text-slate-400 truncate">{userEmail || 'local@sccjobs.in'}</p>
+                <p className="font-bold text-slate-900 truncate">
+                  {profile?.display_name || displayName || currentUser}
+                </p>
+                <p className="text-[11px] text-slate-400 truncate">
+                  {authUser?.email || userEmail || 'local@sccjobs.in'}
+                </p>
                 <div className="mt-1.5 flex items-center gap-1.5">
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 uppercase tracking-wider">
-                    {appRole || (currentUser === 'Admin' ? 'Admin' : 'Recruiter')}
+                    {profile?.role || appRole || (currentUser === 'Admin' ? 'Admin' : 'Recruiter')}
                   </span>
                   {authUser ? (
-                    <span className="text-[10px] text-emerald-600 flex items-center gap-0.5 font-medium">
+                    <span className="text-[10px] text-emerald-600 flex items-center gap-0.5 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded">
                       <CheckCircle2 size={11} /> Verified Auth
                     </span>
                   ) : (
-                    <span className="text-[10px] text-slate-400 font-medium">Local Session</span>
+                    <span className="text-[10px] text-slate-400 font-medium">Mock Session</span>
                   )}
                 </div>
               </div>
 
-              {/* Dev/Demo Role Switcher (Shown only when unauthenticated/local mode to prevent unauthorized privilege escalation) */}
-              {!authUser && (
+              {/* Dev/Demo Role Switcher — ONLY rendered when Supabase is completely unconfigured for local mock development */}
+              {!isSupabaseConfigured && (
                 <div className="px-3 py-2 bg-slate-50 rounded-lg my-1">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                    Dev Role Switch
+                    Dev Role Switch (Mock Mode)
                   </p>
                   <select
                     value={currentUser}
@@ -376,11 +384,24 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileMenu }) => {
                   navigate('/activities');
                   setUserDropdownOpen(false);
                 }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium flex items-center justify-between"
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-slate-700 font-medium flex items-center justify-between transition-colors"
               >
                 <span>Settings & Logs</span>
                 <ExternalLink size={13} className="text-slate-400" />
               </button>
+
+              {authUser && (
+                <button
+                  onClick={async () => {
+                    setUserDropdownOpen(false);
+                    await signOut();
+                  }}
+                  className="w-full text-left px-3 py-2 mt-1 border-t border-slate-100 rounded-lg hover:bg-red-50 text-red-600 font-medium flex items-center justify-between transition-colors cursor-pointer"
+                >
+                  <span>Sign Out</span>
+                  <LogOut size={13} />
+                </button>
+              )}
             </div>
           )}
         </div>

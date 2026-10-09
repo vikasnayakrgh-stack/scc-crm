@@ -41,6 +41,87 @@
 
 ## Historical Changelog
 
+### [2026-10-09] Production Release: Migration 007 Live Execution & Release Verification
+- **Task Reference:** Final Pre-Production QA & Approved Release Execution
+- **Agent Model / ID:** Senior QA & Full-Stack Architect
+- **Scope:** Supabase Database Migration 007 Execution, Live Verification, Production Codebase Release
+
+#### 1. Rationale & Problem Description
+- Executed approved migration `20261007000007_interview_intelligence_and_remarks.sql` on live Supabase cloud (`zshihpvmtvwsbwrjpugy`).
+- Verified database engine objects: added `rating` (integer 1-5) and `next_action` (text) to `public.interviews`, updated `interviews_status_check` constraint to include `'Rejected'` and `'On Hold'`, and verified 3 partial performance indexes (`idx_interviews_rating`, `idx_interviews_status`, `idx_interviews_candidate_scheduled`).
+- Deployed comprehensive authentication guard, candidate profile drawers, client profile drawers, interview edit/rating modals, post-call update workflows, and offline sync resilience.
+
+#### 2. Affected Files
+- `supabase/migrations/20261007000007_interview_intelligence_and_remarks.sql` (Executed on Supabase)
+- `src/types.ts` (Modified)
+- `src/screens/Candidates.tsx`, `src/screens/Employers.tsx`, `src/screens/Interviews.tsx`, `src/screens/Leads.tsx`, `src/screens/Dashboard.tsx`, `src/screens/Login.tsx` (Modified / Created)
+- `src/components/CandidateProfileDrawer.tsx`, `src/components/ClientProfileDrawer.tsx`, `src/components/InterviewUpdateModal.tsx`, `src/components/LoginModal.tsx`, `src/components/Header.tsx`, `src/components/Layout.tsx`, `src/components/ui.tsx` (Modified / Created)
+- `src/context/DataContext.tsx`, `src/lib/offlineQueue.ts`, `src/App.tsx` (Modified)
+- `src/__tests__/recruitmentWorkflowIntelligence.test.ts`, `src/__tests__/authFlow.test.ts`, `src/__tests__/authAwareSync.test.ts` (Created & Cleaned)
+
+#### 3. Architectural & Business Invariants Impacted
+- Preserved Selection ≠ Placed invariant.
+- Preserved Hot Leads = Never Called invariant.
+- Preserved Call logs caller attribution & immutable audit trail.
+- Preserved Remarks Separation: `candidates.notes` (internal assessment) vs `interviews.feedback` (interview round feedback).
+- Zero data loss, zero destructive database changes.
+
+#### 4. Verification & Testing Evidence
+- **Live Supabase DDL:** Migration applied via Supabase Management API; columns, constraint `interviews_status_check`, and indexes verified live via `information_schema` and `pg_constraint`.
+- **Automated Tests:** `npm test -- --run` -> **172 passed across 12 test files** (0 failures).
+- **TypeScript Strictness:** `tsc --noEmit` -> **0 errors** (exited code 0).
+- **Production Build:** `npm run build` -> **Vite bundle built cleanly**.
+
+---
+
+### [2026-10-07] Recruitment Workflow & Candidate Intelligence Upgrade
+- **Task Reference:** Recruitment Workflow & Candidate Intelligence Upgrade
+- **Agent Model / ID:** Senior Full-Stack Engineer + Product/UX Designer (Gemini 3.8 Flash)
+- **Scope:** Frontend UX, Candidate Drawer, Interview Remarks & Ratings, Multi-Axis Filters, Client Drawer, Lead Show Number & Post-Call Flow, Migration 007 Preparation
+
+#### 1. Rationale & Problem Description
+Transformed the CRM into an intuitive recruitment operations system for telecallers and recruiters:
+1. **Candidate Profile & History:** Added slide-over `CandidateProfileDrawer` opened by clicking candidate name, persistent screening remarks saved to `candidates.notes` (separate from interview remarks), and chronological interview journey with ⭐ 1-5 ratings and feedback remarks.
+2. **Interview Remarks & Rating (⭐ 1-5):** Created `InterviewUpdateModal` for updating interview date, time, status, ⭐ 1-5 rating, remarks/feedback, and next action. Prepared additive migration `20261007000007_interview_intelligence_and_remarks.sql`.
+3. **Advanced Candidate Filters:** Enhanced filter bar with search, status tabs, experience brackets, dynamic qualification selection, salary min/max, smart interview status filter (`Never Interviewed`, `Selected`, `Rejected`, `On Hold`, etc.), active filter counter, and Clear Filters action.
+4. **Client / Employer Profile:** Added `ClientProfileDrawer` showing client details, open vacancies, and candidate interview history sent to that client with position, status, rating, remarks, and filters.
+5. **Leads Phone Reveal & Unified Post-Call Flow:** Added phone masking and explicit `[Show Number]` toggle (reveals and copies to clipboard), explicit row actions `[Show Number] [Call] [Update] [Follow-up] [History]`. Clicking `Call` or `Update` opens the 4-step Post-Call Update Panel (Call Outcome -> Lead Status auto-suggested -> Call Remark -> Next Action / Follow-up -> Atomic Save).
+6. **Lead Profile & Activity Timeline:** Upgraded lead detail view to slide-over `Drawer` displaying candidate details, editable persistent notes, and unified chronological activity timeline (Ingestion -> Calls -> Follow-ups -> Reassignments -> Conversion).
+7. **Recruiter Daily Action Radar on Dashboard:** Surfaced live queue focus cards on Dashboard for Hot Leads (never called), New Leads ingested today, Follow-ups due today (with overdue badge), Interviews today, and Pending interview feedback.
+
+#### 2. Affected Files
+- `supabase/migrations/20261007000007_interview_intelligence_and_remarks.sql` (Created - prepared additive migration, unapplied)
+- `src/types.ts` (Modified - expanded InterviewStatus and added rating, next_action)
+- `src/components/ui.tsx` (Modified - added reusable slide-over `Drawer` component)
+- `src/components/InterviewUpdateModal.tsx` (Created - reusable interview edit/rating modal)
+- `src/components/CandidateProfileDrawer.tsx` (Created - candidate profile & interview journey drawer)
+- `src/components/ClientProfileDrawer.tsx` (Created - client profile & candidate interview history drawer)
+- `src/screens/Candidates.tsx` (Modified - clickable candidate names, drawer, multi-axis filter bar)
+- `src/screens/Employers.tsx` (Modified - clickable company names, client drawer, quick interviews link)
+- `src/screens/Interviews.tsx` (Modified - clickable candidate names, star ratings, remarks, interview update modal)
+- `src/screens/Leads.tsx` (Modified - phone masking, Show Number, Post-Call Update Panel, activity journey drawer)
+- `src/screens/Dashboard.tsx` (Modified - Recruiter Daily Action Radar surfacing hot leads, follow-ups, and pending feedback)
+- `src/__tests__/recruitmentWorkflowIntelligence.test.ts` (Created - 15 comprehensive unit & integration tests)
+
+#### 3. Architectural & Business Invariants Impacted
+- Preserved Selection ≠ Placed invariant.
+- Preserved Hot Leads = Never Called invariant.
+- Preserved Call logs caller attribution & immutable audit trail invariant.
+- Preserved separation of Candidate Remarks (`candidates.notes`) vs Interview Remarks (`interviews.feedback`) vs Call Remarks (`call_logs.note`).
+- Preserved Universal Lead Visibility.
+- Additive database changes only (zero live DB mutations without approval).
+
+#### 4. Verification & Testing Evidence
+- **Automated Tests:** `npm test -- --run` -> **172 passed across 12 test files** (0 failures).
+- **TypeScript Strictness:** `npx tsc --noEmit` -> **0 errors** (exited code 0).
+- **Production Build:** `npm run build` -> **Vite production bundle built cleanly in 23.52s**.
+
+#### 5. Unresolved Risks & Operational Notes
+- Migration `20261007000007_interview_intelligence_and_remarks.sql` is prepared locally and awaits explicit user approval before execution against Supabase Cloud PostgreSQL.
+- Git commit and push require explicit user approval.
+
+---
+
 ### [2026-10-07] Production Activation & Live Verification Deployment
 - **Task Reference:** SCC CRM — Production Activation & Live Smoke Test
 - **Agent Model / ID:** Senior Software Architect & AI Agent Governance Engineering

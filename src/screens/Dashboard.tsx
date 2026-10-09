@@ -25,7 +25,9 @@ import {
   ArrowUpRight,
   Sparkles,
   Search,
-  Filter
+  Filter,
+  Flame,
+  Star,
 } from 'lucide-react';
 import { isSameDay, isPast, parseISO, format } from 'date-fns';
 import { Button, Input, Modal, Label, Badge, Card, EmptyState } from '../components/ui';
@@ -35,6 +37,7 @@ import { FollowUpTask, ApplicationStage, USERS } from '../types';
 export default function Dashboard() {
   const navigate = useNavigate();
   const {
+    leads,
     candidates,
     employers,
     jobs,
@@ -75,6 +78,32 @@ export default function Dashboard() {
 
   // Follow-up tab filter
   const [followUpTab, setFollowUpTab] = useState<'today' | 'overdue' | 'upcoming'>('today');
+
+  // Hot Leads & Lead Ingestion Metrics (Requirement 18)
+  const calledLeadIds = new Set(callLogs.filter((c) => c.lead_id).map((c) => c.lead_id));
+  const hotLeads = (leads || []).filter(
+    (l) => l.is_active && !calledLeadIds.has(l.id) && l.category !== 'Converted' && l.category !== 'Rejected'
+  );
+  const newLeadsToday = (leads || []).filter((l) => {
+    try {
+      return l.is_active && isSameDay(parseISO(l.created_at), now);
+    } catch {
+      return false;
+    }
+  });
+
+  // Pending Interview Feedback (Interviews held today or earlier awaiting rating/remarks)
+  const pendingFeedbackInterviews = interviews.filter((i) => {
+    try {
+      if (i.is_active === false) return false;
+      const scheduledDate = parseISO(i.scheduled_time);
+      const isPastOrToday = isPast(scheduledDate) || isSameDay(scheduledDate, now);
+      if (!isPastOrToday) return false;
+      return i.status === 'Scheduled' || (i.status === 'Done' && (!i.feedback || !i.rating));
+    } catch {
+      return false;
+    }
+  });
 
   // 1. Calling Activity Metrics
   const todayCalls = callLogs.filter((c) => {
@@ -349,6 +378,102 @@ export default function Dashboard() {
             <Plus size={14} />
             <span>Add Candidate</span>
           </Button>
+        </div>
+      </div>
+
+      {/* ─── RECRUITER DAILY WORKFLOW & ACTION RADAR (Requirement 18) ─── */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 rounded-2xl p-4 md:p-5 text-white shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3 pb-3 border-b border-slate-700/60">
+          <div>
+            <h2 className="text-sm font-bold tracking-wide uppercase text-blue-300 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              Recruiter Action Radar • Daily Priority Queue
+            </h2>
+            <p className="text-xs text-slate-300 mt-0.5">
+              High-impact tasks demanding your immediate attention today
+            </p>
+          </div>
+          <span className="text-[11px] bg-slate-800/80 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 font-mono">
+            Live Queue Focus
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+          {/* Hot Leads */}
+          <div
+            onClick={() => navigate('/leads')}
+            className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 hover:border-rose-500/50 rounded-xl p-3 cursor-pointer transition-all group"
+          >
+            <div className="flex items-center justify-between text-rose-400 text-xs font-semibold mb-1">
+              <span className="flex items-center gap-1">
+                <Flame className="w-3.5 h-3.5 text-rose-500 fill-rose-500" /> Hot Leads
+              </span>
+              <ArrowUpRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+            <div className="text-2xl font-black text-white">{hotLeads.length}</div>
+            <p className="text-[11px] text-slate-400 mt-0.5">Never contacted</p>
+          </div>
+
+          {/* New Leads Today */}
+          <div
+            onClick={() => navigate('/leads')}
+            className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 hover:border-blue-500/50 rounded-xl p-3 cursor-pointer transition-all group"
+          >
+            <div className="flex items-center justify-between text-blue-400 text-xs font-semibold mb-1">
+              <span>New Leads</span>
+              <ArrowUpRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+            <div className="text-2xl font-black text-white">+{newLeadsToday.length}</div>
+            <p className="text-[11px] text-slate-400 mt-0.5">Ingested today</p>
+          </div>
+
+          {/* Follow-ups Due */}
+          <div
+            onClick={() => navigate('/tasks')}
+            className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 hover:border-amber-500/50 rounded-xl p-3 cursor-pointer transition-all group"
+          >
+            <div className="flex items-center justify-between text-amber-400 text-xs font-semibold mb-1">
+              <span>Follow-ups</span>
+              <ArrowUpRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+            <div className="text-2xl font-black text-white flex items-baseline gap-1.5">
+              <span>{dueTodayTasks.length}</span>
+              {overdueTasks.length > 0 && (
+                <span className="text-[10px] bg-rose-500/20 text-rose-300 font-bold px-1.5 py-0.5 rounded border border-rose-500/30">
+                  {overdueTasks.length} overdue
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-0.5">Due for call today</p>
+          </div>
+
+          {/* Today's Interviews */}
+          <div
+            onClick={() => navigate('/interviews')}
+            className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 hover:border-purple-500/50 rounded-xl p-3 cursor-pointer transition-all group"
+          >
+            <div className="flex items-center justify-between text-purple-400 text-xs font-semibold mb-1">
+              <span>Interviews</span>
+              <ArrowUpRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+            <div className="text-2xl font-black text-white">{todayInterviews.length}</div>
+            <p className="text-[11px] text-slate-400 mt-0.5">Candidate meetings</p>
+          </div>
+
+          {/* Pending Interview Feedback */}
+          <div
+            onClick={() => navigate('/interviews')}
+            className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 hover:border-amber-500/50 rounded-xl p-3 cursor-pointer transition-all group col-span-2 sm:col-span-1"
+          >
+            <div className="flex items-center justify-between text-amber-300 text-xs font-semibold mb-1">
+              <span className="flex items-center gap-1">
+                <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" /> Feedback Due
+              </span>
+              <ArrowUpRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+            <div className="text-2xl font-black text-white">{pendingFeedbackInterviews.length}</div>
+            <p className="text-[11px] text-slate-400 mt-0.5">Needs rating & remarks</p>
+          </div>
         </div>
       </div>
 

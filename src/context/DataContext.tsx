@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import {
   Candidate,
@@ -39,6 +39,7 @@ interface DataContextType {
   isOffline: boolean;
   pendingCount: number;
   deadLetterCount: number;
+  isSyncing: boolean;
   refreshData: () => Promise<void>;
   insert: (table: string, data: any) => Promise<any>;
   update: (table: string, data: any) => Promise<any>;
@@ -92,6 +93,8 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingCount, setPendingCount] = useState(0);
   const [deadLetterCount, setDeadLetterCount] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const isSyncingRef = useRef(false);
 
   // Sync state to local storage for persistence across reloads
   useEffect(() => { saveToLocalStorage('candidates', candidates); }, [candidates]);
@@ -161,19 +164,37 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const entityId = mutation.entityId || mutation.data?.id;
 
+    let payload = mutation.data;
+    if (mutation.table === 'applications' && payload?.assigned_to) {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(payload.assigned_to)) {
+        payload = { ...payload, assigned_to: null };
+      }
+    }
+    if (mutation.table === 'call_logs' && payload && 'created_at' in payload) {
+      const { created_at: _unused, ...rest } = payload;
+      payload = rest;
+    }
+
     if (mutation.type === 'insert') {
       // Idempotent insert: use upsert with onConflict on primary key 'id' and ignoreDuplicates: true
       return await supabase
         .from(mutation.table)
-        .upsert(mutation.data, { onConflict: 'id', ignoreDuplicates: true });
+        .upsert(payload, { onConflict: 'id', ignoreDuplicates: true });
     } else if (mutation.type === 'update') {
       // Optimistic concurrency control (OCC): check expectedUpdatedAt if present
-      let query = supabase.from(mutation.table).update(mutation.data).eq('id', entityId);
+      let query = supabase.from(mutation.table).update(payload).eq('id', entityId);
       if (mutation.expectedUpdatedAt) {
         query = query.eq('updated_at', mutation.expectedUpdatedAt);
       }
       const res = await query.select();
       if (!res.error && res.data && res.data.length === 0 && mutation.expectedUpdatedAt) {
+        // Check if the record actually exists remotely
+        const { data: remoteExisting } = await supabase.from(mutation.table).select('id').eq('id', entityId).maybeSingle();
+        if (!remoteExisting) {
+          // Record was never synced or created remotely; upsert it to prevent silent data loss
+          return await supabase.from(mutation.table).upsert(payload, { onConflict: 'id' });
+        }
         return {
           error: {
             code: 'CONCURRENCY_CONFLICT',
@@ -188,11 +209,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { error: new Error('Unknown mutation type') };
   }, []);
 
-  // Process offline queue with backoff, session guard, and DLQ
+  // Process offline queue with backoff, session guard, single-flight protection, and DLQ
   const syncNow = useCallback(async () => {
     if (!navigator.onLine) {
       toast.error('Cannot sync while offline');
       return;
+    }
+
+    if (isSyncingRef.current) {
+      return; // Single-flight protection: prevent concurrent queue processors
     }
 
     // Session freshness check: pause sync if session expired or unauthenticated
@@ -200,24 +225,66 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       if (sessionError || !session) {
         console.warn('Sync paused: No active Supabase session. Will resume once authenticated.');
+        await updateQueueStatus();
         return;
       }
     }
 
-    const result = await processOfflineQueue(executeRemoteMutation);
-    await updateQueueStatus();
+    isSyncingRef.current = true;
+    setIsSyncing(true);
 
-    if (result.processed > 0) {
-      toast.success(`${result.processed} change${result.processed > 1 ? 's' : ''} synced!`);
-      await fetchData();
-    }
-    if (result.deadLettered > 0) {
-      toast.error(`${result.deadLettered} item(s) rejected due to constraint errors.`);
+    try {
+      const result = await processOfflineQueue(executeRemoteMutation, {
+        onProgress: async () => {
+          await updateQueueStatus();
+        },
+      });
+
+      await updateQueueStatus();
+
+      if (result.processed > 0) {
+        toast.success(`${result.processed} change${result.processed > 1 ? 's' : ''} synced!`);
+        await fetchData();
+      }
+      if (result.deadLettered > 0) {
+        toast.error(`${result.deadLettered} item(s) rejected due to constraint errors.`);
+      }
+    } finally {
+      isSyncingRef.current = false;
+      setIsSyncing(false);
+      await updateQueueStatus();
     }
   }, [executeRemoteMutation, updateQueueStatus, fetchData]);
 
+  // Auth-aware queue resume: subscribe to onAuthStateChange to automatically resume sync on login
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, newSession) => {
+        if (newSession && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
+          await updateQueueStatus();
+          syncNow();
+        }
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [syncNow, updateQueueStatus]);
+
   useEffect(() => {
     fetchData();
+
+    // Check if initial session exists to resume pending mutations
+    if (isSupabaseConfigured) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) {
+          syncNow();
+        }
+      });
+    }
 
     const handleOffline = () => setIsOffline(true);
     const handleOnline = () => {
@@ -671,6 +738,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isOffline,
       pendingCount,
       deadLetterCount,
+      isSyncing,
       refreshData: fetchData,
       insert,
       update,

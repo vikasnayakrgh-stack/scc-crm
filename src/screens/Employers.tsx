@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { Button, Input, Modal, Label, Badge, CardSkeleton } from '../components/ui';
-import { Plus, Phone, Mail, MapPin, Search, Pencil } from 'lucide-react';
+import { Plus, Phone, Mail, MapPin, Search, Pencil, Users, ExternalLink } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { employerSchema, type EmployerInput } from '../lib/validation';
-import { Employer } from '../types';
+import { Employer, Candidate } from '../types';
+import { ClientProfileDrawer } from '../components/ClientProfileDrawer';
+import { CandidateProfileDrawer } from '../components/CandidateProfileDrawer';
 
 export default function Employers() {
   const { employers, jobs, loading, insert, update } = useData();
@@ -14,6 +16,8 @@ export default function Employers() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingEmployer, setEditingEmployer] = useState<Employer | null>(null);
+  const [selectedProfileEmployer, setSelectedProfileEmployer] = useState<Employer | null>(null);
+  const [selectedProfileCandidate, setSelectedProfileCandidate] = useState<Candidate | null>(null);
 
   const addForm = useForm<EmployerInput>({
     resolver: zodResolver(employerSchema),
@@ -173,8 +177,16 @@ export default function Employers() {
               >
                 <div className="flex justify-between items-start">
                   <div>
-                    <h3 className="font-bold text-slate-800 text-base">{emp.company_name}</h3>
-                    <p className="text-xs text-slate-600 font-medium">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProfileEmployer(emp)}
+                      className="font-bold text-slate-900 text-base hover:text-blue-600 hover:underline text-left transition-colors cursor-pointer flex items-center gap-1"
+                      title="Click to view client profile, requirements and candidate interview history"
+                    >
+                      {emp.company_name}
+                      <ExternalLink size={13} className="text-slate-400" />
+                    </button>
+                    <p className="text-xs text-slate-600 font-medium mt-0.5">
                       Contact: {emp.contact_person} {emp.industry ? `• ${emp.industry}` : ''}
                     </p>
                   </div>
@@ -210,17 +222,25 @@ export default function Employers() {
 
                   <div className="flex items-center gap-2">
                     <button
+                      type="button"
+                      onClick={() => setSelectedProfileEmployer(emp)}
+                      className="px-2 py-1 bg-blue-50 text-blue-700 rounded font-medium hover:bg-blue-100 flex items-center gap-1 text-xs"
+                      title="View Candidate Interview History"
+                    >
+                      <Users size={12} /> Interviews
+                    </button>
+                    <button
                       onClick={() => handleOpenEdit(emp)}
-                      className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded font-medium hover:bg-slate-200 flex items-center gap-1 text-xs"
+                      className="px-2 py-1 bg-slate-100 text-slate-700 rounded font-medium hover:bg-slate-200 flex items-center gap-1 text-xs"
                       title="Edit Employer"
                     >
-                      <Pencil size={13} /> Edit
+                      <Pencil size={12} /> Edit
                     </button>
                     <a
                       href={`tel:${emp.phone}`}
-                      className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded font-medium hover:bg-blue-100 flex items-center gap-1 text-xs"
+                      className="px-2 py-1 bg-slate-100 text-slate-700 rounded font-medium hover:bg-slate-200 flex items-center gap-1 text-xs"
                     >
-                      <Phone size={13} /> Call HR
+                      <Phone size={12} /> Call
                     </a>
                   </div>
                 </div>
@@ -436,6 +456,22 @@ export default function Employers() {
           </div>
         </form>
       </Modal>
+
+      {/* Client Profile & Candidate Interview History Drawer */}
+      <ClientProfileDrawer
+        isOpen={Boolean(selectedProfileEmployer)}
+        onClose={() => setSelectedProfileEmployer(null)}
+        employer={selectedProfileEmployer}
+        onEditEmployer={(emp) => handleOpenEdit(emp)}
+        onOpenCandidateProfile={(cand) => setSelectedProfileCandidate(cand)}
+      />
+
+      {/* Candidate Profile Drawer (accessible from client interview history) */}
+      <CandidateProfileDrawer
+        isOpen={Boolean(selectedProfileCandidate)}
+        onClose={() => setSelectedProfileCandidate(null)}
+        candidate={selectedProfileCandidate}
+      />
     </div>
   );
 }

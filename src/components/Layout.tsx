@@ -9,19 +9,24 @@ import {
   CheckSquare,
   WifiOff,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  Lock
 } from 'lucide-react';
 import { Toaster } from 'react-hot-toast';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { LoginModal } from './LoginModal';
 import { useData } from '../context/DataContext';
+import { useAuth } from '../context/AuthContext';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
-  const { isOffline, pendingCount, deadLetterCount } = useData();
+  const { isOffline, pendingCount, deadLetterCount, isSyncing, syncNow } = useData();
+  const { user, session } = useAuth();
+  const isAuthenticated = Boolean(user && session);
 
   const [isCollapsed, setIsCollapsed] = useState(() => {
     try {
@@ -32,6 +37,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   });
 
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -69,10 +75,39 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           </div>
         )}
 
-        {pendingCount > 0 && !isOffline && (
-          <div className="bg-amber-600 text-white text-xs px-4 py-1 font-semibold flex justify-center items-center gap-2 sticky top-0 z-50 shadow-xs">
+        {/* State 1: Authenticated + actively syncing */}
+        {pendingCount > 0 && !isOffline && isAuthenticated && isSyncing && (
+          <div className="bg-amber-600 text-white text-xs px-4 py-1.5 font-semibold flex justify-center items-center gap-2 sticky top-0 z-50 shadow-xs">
             <RefreshCw size={13} className="animate-spin" />
-            <span>Syncing {pendingCount} offline change{pendingCount > 1 ? 's' : ''} with Supabase cloud...</span>
+            <span>Syncing {pendingCount} offline change{pendingCount > 1 ? 's' : ''} with Supabase...</span>
+          </div>
+        )}
+
+        {/* State 2: Not authenticated + pending changes (NO animated spinner) */}
+        {pendingCount > 0 && !isOffline && !isAuthenticated && (
+          <div className="bg-amber-600 text-white text-xs px-4 py-1.5 font-semibold flex justify-center items-center gap-2 sticky top-0 z-50 shadow-xs">
+            <Lock size={13} />
+            <span>{pendingCount} change{pendingCount > 1 ? 's' : ''} saved offline — Login required to sync</span>
+            <button
+              onClick={() => setLoginModalOpen(true)}
+              className="ml-2 bg-white/20 hover:bg-white/30 text-white px-2 py-0.5 rounded text-[11px] font-bold underline transition-colors cursor-pointer"
+            >
+              Sign In
+            </button>
+          </div>
+        )}
+
+        {/* Authenticated + pending changes + idle/pause */}
+        {pendingCount > 0 && !isOffline && isAuthenticated && !isSyncing && (
+          <div className="bg-amber-600 text-white text-xs px-4 py-1.5 font-semibold flex justify-center items-center gap-2 sticky top-0 z-50 shadow-xs">
+            <RefreshCw size={13} />
+            <span>{pendingCount} offline change{pendingCount > 1 ? 's' : ''} pending sync</span>
+            <button
+              onClick={() => syncNow()}
+              className="ml-2 bg-white/20 hover:bg-white/30 text-white px-2 py-0.5 rounded text-[11px] font-bold underline transition-colors cursor-pointer"
+            >
+              Sync Now
+            </button>
           </div>
         )}
 
@@ -84,7 +119,10 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         )}
 
         {/* Global Top Header */}
-        <Header onOpenMobileMenu={() => setMobileOpen(true)} />
+        <Header onOpenMobileMenu={() => setMobileOpen(true)} onOpenSignIn={() => setLoginModalOpen(true)} />
+
+        {/* Login Modal */}
+        <LoginModal isOpen={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
 
         {/* Dynamic Route Content */}
         <main className="flex-1 p-4 md:p-6 lg:p-8 max-w-[1600px] w-full mx-auto pb-24 md:pb-12">

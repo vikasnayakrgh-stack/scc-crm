@@ -18,17 +18,115 @@ import {
 import { calculateCandidateJobMatch } from '../lib/matching';
 import { scheduleInterviewWithApplication } from '../lib/pipelineHelpers';
 import { CandidateImportModal } from '../components/CandidateImportModal';
+import { CandidateProfileDrawer } from '../components/CandidateProfileDrawer';
+import { SlidersHorizontal, X, RotateCcw } from 'lucide-react';
 
 export default function Candidates() {
-  const { candidates, jobs, applications, loading, insert, update } = useData();
+  const { candidates, jobs, applications, interviews, loading, insert, update } = useData();
   const { currentUser } = useUser();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Placed' | 'Blacklisted'>('All');
+  const [experienceFilter, setExperienceFilter] = useState<'All' | 'fresher' | '0-1' | '1-3' | '3-5' | '5+'>('All');
+  const [interviewStatusFilter, setInterviewStatusFilter] = useState<
+    'All' | 'Never Interviewed' | 'Interview Scheduled' | 'Interviewed' | 'Selected' | 'Rejected' | 'On Hold'
+  >('All');
+  const [qualificationFilter, setQualificationFilter] = useState<string>('All');
+  const [minSalary, setMinSalary] = useState<string>('');
+  const [maxSalary, setMaxSalary] = useState<string>('');
+  const [locationFilter, setLocationFilter] = useState<string>('All');
+  const [noticeFilter, setNoticeFilter] = useState<string>('All');
+  const [sourceFilter, setSourceFilter] = useState<string>('All');
+  const [isMoreFiltersOpen, setIsMoreFiltersOpen] = useState(false);
+
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+  const [selectedProfileCandidate, setSelectedProfileCandidate] = useState<Candidate | null>(null);
   const [editingCandidate, setEditingCandidate] = useState<Candidate | null>(null);
+
+  // Dynamic qualification options extracted from actual candidates data
+  const dynamicQualifications = useMemo(() => {
+    const set = new Set<string>();
+    QUALIFICATION_OPTIONS.forEach((q) => {
+      if (q !== 'Other') set.add(q);
+    });
+    candidates.forEach((c) => {
+      if (c.qualification && c.qualification.trim()) set.add(c.qualification.trim());
+    });
+    return Array.from(set).sort();
+  }, [candidates]);
+
+  // Dynamic location options
+  const dynamicLocations = useMemo(() => {
+    const set = new Set<string>();
+    candidates.forEach((c) => {
+      if (c.location && c.location.trim()) set.add(c.location.trim());
+    });
+    return Array.from(set).sort();
+  }, [candidates]);
+
+  // Dynamic notice period options
+  const dynamicNotices = useMemo(() => {
+    const set = new Set<string>();
+    NOTICE_PERIOD_OPTIONS.forEach((n) => {
+      if (n !== 'Other') set.add(n);
+    });
+    candidates.forEach((c) => {
+      if (c.notice_period && c.notice_period.trim()) set.add(c.notice_period.trim());
+    });
+    return Array.from(set).sort();
+  }, [candidates]);
+
+  // Dynamic sources
+  const dynamicSources = useMemo(() => {
+    const set = new Set<string>();
+    ACQUISITION_SOURCE_OPTIONS.forEach((s) => {
+      if (s !== 'Other') set.add(s);
+    });
+    candidates.forEach((c) => {
+      if (c.source && c.source.trim()) set.add(c.source.trim());
+    });
+    return Array.from(set).sort();
+  }, [candidates]);
+
+  // Active filters count
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (statusFilter !== 'All') count++;
+    if (experienceFilter !== 'All') count++;
+    if (interviewStatusFilter !== 'All') count++;
+    if (qualificationFilter !== 'All') count++;
+    if (minSalary.trim()) count++;
+    if (maxSalary.trim()) count++;
+    if (locationFilter !== 'All') count++;
+    if (noticeFilter !== 'All') count++;
+    if (sourceFilter !== 'All') count++;
+    return count;
+  }, [
+    statusFilter,
+    experienceFilter,
+    interviewStatusFilter,
+    qualificationFilter,
+    minSalary,
+    maxSalary,
+    locationFilter,
+    noticeFilter,
+    sourceFilter,
+  ]);
+
+  const handleClearFilters = () => {
+    setSearch('');
+    setStatusFilter('All');
+    setExperienceFilter('All');
+    setInterviewStatusFilter('All');
+    setQualificationFilter('All');
+    setMinSalary('');
+    setMaxSalary('');
+    setLocationFilter('All');
+    setNoticeFilter('All');
+    setSourceFilter('All');
+  };
 
   // Custom options state for Add modal
   const [addQualSelect, setAddQualSelect] = useState('');
@@ -90,18 +188,112 @@ export default function Candidates() {
 
   const filteredCandidates = useMemo(() => {
     return candidates.filter((c) => {
-      const matchesSearch =
-        c.name.toLowerCase().includes(search.toLowerCase()) ||
-        c.mobile.includes(search) ||
-        (c.skills || []).some((s) => s.toLowerCase().includes(search.toLowerCase())) ||
-        (c.last_role || '').toLowerCase().includes(search.toLowerCase()) ||
-        (c.qualification || '').toLowerCase().includes(search.toLowerCase()) ||
-        (c.location || '').toLowerCase().includes(search.toLowerCase());
+      // 1. Search Query
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const matchesSearch =
+          c.name.toLowerCase().includes(q) ||
+          c.mobile.includes(q) ||
+          (c.skills || []).some((s) => s.toLowerCase().includes(q)) ||
+          (c.last_role || '').toLowerCase().includes(q) ||
+          (c.qualification || '').toLowerCase().includes(q) ||
+          (c.location || '').toLowerCase().includes(q);
+        if (!matchesSearch) return false;
+      }
 
-      const matchesStatus = statusFilter === 'All' || c.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      // 2. Candidate Status Filter
+      if (statusFilter !== 'All' && c.status !== statusFilter) {
+        return false;
+      }
+
+      // 3. Experience Filter
+      if (experienceFilter !== 'All') {
+        const exp = Number(c.experience || 0);
+        if (experienceFilter === 'fresher' && exp !== 0) return false;
+        if (experienceFilter === '0-1' && (exp <= 0 || exp > 1)) return false;
+        if (experienceFilter === '1-3' && (exp <= 1 || exp > 3)) return false;
+        if (experienceFilter === '3-5' && (exp <= 3 || exp > 5)) return false;
+        if (experienceFilter === '5+' && exp < 5) return false;
+      }
+
+      // 4. Smart Interview Status Filter
+      if (interviewStatusFilter !== 'All') {
+        const cInterviews = interviews.filter((i) => i.candidate_id === c.id && i.is_active !== false);
+        if (interviewStatusFilter === 'Never Interviewed') {
+          if (cInterviews.length > 0) return false;
+        } else if (interviewStatusFilter === 'Interview Scheduled') {
+          if (!cInterviews.some((i) => i.status === 'Scheduled')) return false;
+        } else if (interviewStatusFilter === 'Interviewed') {
+          if (!cInterviews.some((i) => i.status === 'Done' || i.status === 'Selected' || i.status === 'Rejected')) return false;
+        } else if (interviewStatusFilter === 'Selected') {
+          if (!cInterviews.some((i) => i.status === 'Selected')) return false;
+        } else if (interviewStatusFilter === 'Rejected') {
+          if (!cInterviews.some((i) => i.status === 'Rejected')) return false;
+        } else if (interviewStatusFilter === 'On Hold') {
+          if (!cInterviews.some((i) => i.status === 'On Hold')) return false;
+        }
+      }
+
+      // 5. Qualification Filter
+      if (qualificationFilter !== 'All') {
+        if (!c.qualification || c.qualification.toLowerCase() !== qualificationFilter.toLowerCase()) {
+          return false;
+        }
+      }
+
+      // 6. Salary Range
+      if (minSalary.trim()) {
+        const minVal = parseInt(minSalary, 10);
+        if (!isNaN(minVal)) {
+          const candSal = c.expected_salary || c.current_salary || 0;
+          if (candSal < minVal) return false;
+        }
+      }
+      if (maxSalary.trim()) {
+        const maxVal = parseInt(maxSalary, 10);
+        if (!isNaN(maxVal)) {
+          const candSal = c.expected_salary || 0;
+          if (candSal > maxVal) return false;
+        }
+      }
+
+      // 7. Location Filter
+      if (locationFilter !== 'All') {
+        if (!c.location || c.location.toLowerCase() !== locationFilter.toLowerCase()) {
+          return false;
+        }
+      }
+
+      // 8. Notice Period Filter
+      if (noticeFilter !== 'All') {
+        if (!c.notice_period || c.notice_period.toLowerCase() !== noticeFilter.toLowerCase()) {
+          return false;
+        }
+      }
+
+      // 9. Source Filter
+      if (sourceFilter !== 'All') {
+        if (!c.source || c.source.toLowerCase() !== sourceFilter.toLowerCase()) {
+          return false;
+        }
+      }
+
+      return true;
     });
-  }, [candidates, search, statusFilter]);
+  }, [
+    candidates,
+    interviews,
+    search,
+    statusFilter,
+    experienceFilter,
+    interviewStatusFilter,
+    qualificationFilter,
+    minSalary,
+    maxSalary,
+    locationFilter,
+    noticeFilter,
+    sourceFilter,
+  ]);
 
   const handleCall = async (c: Candidate) => {
     try {
@@ -344,22 +536,207 @@ export default function Candidates() {
           />
         </div>
 
-        {/* Status filters */}
-        <div className="flex gap-1 overflow-x-auto pb-1">
-          {(['All', 'Active', 'Placed', 'Blacklisted'] as const).map((tab) => (
+        {/* Quick Filter Bar: Search + Status + Experience + Interview Status + More Filters */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            {/* Status Quick Filter Tabs */}
+            <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200/80">
+              {(['All', 'Active', 'Placed', 'Blacklisted'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setStatusFilter(tab)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                    statusFilter === tab
+                      ? 'bg-white text-blue-700 shadow-2xs font-semibold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            {/* Experience Dropdown */}
+            <select
+              value={experienceFilter}
+              onChange={(e) => setExperienceFilter(e.target.value as any)}
+              className="text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="All">All Experience</option>
+              <option value="fresher">Fresher (0 yrs)</option>
+              <option value="0-1">0–1 years</option>
+              <option value="1-3">1–3 years</option>
+              <option value="3-5">3–5 years</option>
+              <option value="5+">5+ years</option>
+            </select>
+
+            {/* Smart Filter: Interview Status */}
+            <select
+              value={interviewStatusFilter}
+              onChange={(e) => setInterviewStatusFilter(e.target.value as any)}
+              className="text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="All">Interview Status: All</option>
+              <option value="Never Interviewed">Never Interviewed</option>
+              <option value="Interview Scheduled">Interview Scheduled</option>
+              <option value="Interviewed">Interviewed</option>
+              <option value="Selected">Selected</option>
+              <option value="Rejected">Rejected</option>
+              <option value="On Hold">On Hold</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {/* More Filters Toggle */}
             <button
-              key={tab}
-              onClick={() => setStatusFilter(tab)}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                statusFilter === tab
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+              type="button"
+              onClick={() => setIsMoreFiltersOpen(!isMoreFiltersOpen)}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium border transition-all ${
+                isMoreFiltersOpen || activeFiltersCount > 0
+                  ? 'bg-blue-50 text-blue-700 border-blue-200 shadow-2xs font-semibold'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
               }`}
             >
-              {tab}
+              <SlidersHorizontal size={13} />
+              <span>More Filters</span>
+              {activeFiltersCount > 0 && (
+                <span className="ml-0.5 bg-blue-600 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
+                  {activeFiltersCount}
+                </span>
+              )}
             </button>
-          ))}
+
+            {/* Clear All Filters */}
+            {(activeFiltersCount > 0 || search.trim()) && (
+              <button
+                type="button"
+                onClick={handleClearFilters}
+                className="flex items-center gap-1 px-2.5 py-1 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors font-medium border border-rose-200"
+                title="Clear all filters"
+              >
+                <RotateCcw size={12} /> Clear
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Expandable "More Filters" Panel */}
+        {isMoreFiltersOpen && (
+          <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-xs space-y-3 animate-in fade-in duration-150">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+              <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                Advanced Candidate Filters
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsMoreFiltersOpen(false)}
+                className="text-xs text-slate-400 hover:text-slate-600"
+              >
+                Close ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 text-xs">
+              {/* Dynamic Education / Qualification */}
+              <div>
+                <Label className="text-[11px] font-semibold text-slate-600 block mb-1">
+                  Education / Qualification
+                </Label>
+                <select
+                  value={qualificationFilter}
+                  onChange={(e) => setQualificationFilter(e.target.value)}
+                  className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 text-slate-700"
+                >
+                  <option value="All">All Qualifications ({dynamicQualifications.length})</option>
+                  {dynamicQualifications.map((q) => (
+                    <option key={q} value={q}>
+                      {q}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Salary Minimum */}
+              <div>
+                <Label className="text-[11px] font-semibold text-slate-600 block mb-1">
+                  Min Expected Salary (₹)
+                </Label>
+                <input
+                  type="number"
+                  placeholder="e.g. 15000"
+                  value={minSalary}
+                  onChange={(e) => setMinSalary(e.target.value)}
+                  className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 text-slate-700"
+                />
+              </div>
+
+              {/* Salary Maximum */}
+              <div>
+                <Label className="text-[11px] font-semibold text-slate-600 block mb-1">
+                  Max Expected Salary (₹)
+                </Label>
+                <input
+                  type="number"
+                  placeholder="e.g. 35000"
+                  value={maxSalary}
+                  onChange={(e) => setMaxSalary(e.target.value)}
+                  className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 text-slate-700"
+                />
+              </div>
+
+              {/* Location */}
+              <div>
+                <Label className="text-[11px] font-semibold text-slate-600 block mb-1">Location / City</Label>
+                <select
+                  value={locationFilter}
+                  onChange={(e) => setLocationFilter(e.target.value)}
+                  className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 text-slate-700"
+                >
+                  <option value="All">All Locations ({dynamicLocations.length})</option>
+                  {dynamicLocations.map((loc) => (
+                    <option key={loc} value={loc}>
+                      {loc}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Notice Period */}
+              <div>
+                <Label className="text-[11px] font-semibold text-slate-600 block mb-1">Notice Period</Label>
+                <select
+                  value={noticeFilter}
+                  onChange={(e) => setNoticeFilter(e.target.value)}
+                  className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 text-slate-700"
+                >
+                  <option value="All">All Notice Periods</option>
+                  {dynamicNotices.map((np) => (
+                    <option key={np} value={np}>
+                      {np}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Acquisition Source */}
+              <div>
+                <Label className="text-[11px] font-semibold text-slate-600 block mb-1">Source</Label>
+                <select
+                  value={sourceFilter}
+                  onChange={(e) => setSourceFilter(e.target.value)}
+                  className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 text-slate-700"
+                >
+                  <option value="All">All Sources</option>
+                  {dynamicSources.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Candidate List */}
@@ -371,8 +748,17 @@ export default function Candidates() {
       ) : (
         <div>
           {filteredCandidates.length === 0 && (
-            <div className="text-center py-10 bg-white rounded-xl border border-dashed border-slate-200 text-xs text-slate-500">
-              No candidates found matching your search.
+            <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-200 text-xs text-slate-500">
+              <p className="font-semibold text-slate-700">No candidates match your filters.</p>
+              <p className="text-slate-400 mt-1">Try adjusting your search query or clear filters.</p>
+              {activeFiltersCount > 0 && (
+                <button
+                  onClick={handleClearFilters}
+                  className="mt-3 px-3 py-1.5 bg-blue-50 text-blue-700 font-medium rounded-lg text-xs"
+                >
+                  Clear All Filters
+                </button>
+              )}
             </div>
           )}
 
@@ -380,37 +766,45 @@ export default function Candidates() {
           {filteredCandidates.map((c) => (
             <div
               key={c.id}
-              className="bg-white p-3.5 rounded-xl shadow-sm border border-slate-100 hover:border-slate-200 transition-all"
+              className="bg-white p-3.5 rounded-xl shadow-xs border border-slate-100 hover:border-slate-300 transition-all flex flex-col justify-between"
             >
-              <div className="flex justify-between items-start">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-slate-800 text-sm">{c.name}</h3>
-                    {c.registration_fee_paid === false && (
-                      <span
-                        className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium border border-amber-200"
-                        title="Registration fee not recorded yet (does not block scheduling)"
+              <div>
+                <div className="flex justify-between items-start gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedProfileCandidate(c)}
+                        className="font-bold text-slate-900 text-sm hover:text-blue-600 hover:underline text-left transition-colors cursor-pointer"
+                        title="Click to view candidate profile, remarks and interview history"
                       >
-                        ₹200 Fee Due
-                      </span>
-                    )}
+                        {c.name}
+                      </button>
+                      {c.registration_fee_paid === false && (
+                        <span
+                          className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium border border-amber-200"
+                          title="Registration fee not recorded yet (does not block scheduling)"
+                        >
+                          ₹200 Fee Due
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      {c.last_role} • {c.experience} yrs exp • {c.location}
+                    </p>
                   </div>
-                  <p className="text-xs text-slate-500 font-medium mt-0.5">
-                    {c.last_role} • {c.experience} yrs exp • {c.location}
-                  </p>
+                  <Badge
+                    color={
+                      c.status === 'Placed'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : c.status === 'Blacklisted'
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-blue-50 text-blue-700'
+                    }
+                  >
+                    {c.status}
+                  </Badge>
                 </div>
-                <Badge
-                  color={
-                    c.status === 'Placed'
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : c.status === 'Blacklisted'
-                      ? 'bg-red-100 text-red-700'
-                      : 'bg-blue-50 text-blue-700'
-                  }
-                >
-                  {c.status}
-                </Badge>
-              </div>
 
               {/* Extended Info Chips */}
               <div className="flex flex-wrap gap-1.5 mt-2">
@@ -442,6 +836,7 @@ export default function Candidates() {
                   </span>
                 ))}
               </div>
+            </div>
 
               {/* Actions & Salary */}
               <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-100 text-xs">
@@ -984,6 +1379,15 @@ export default function Candidates() {
       <CandidateImportModal
         isOpen={isImportOpen}
         onClose={() => setIsImportOpen(false)}
+      />
+
+      {/* Candidate Profile & Interview Journey Drawer */}
+      <CandidateProfileDrawer
+        isOpen={Boolean(selectedProfileCandidate)}
+        onClose={() => setSelectedProfileCandidate(null)}
+        candidate={selectedProfileCandidate}
+        onEditCandidate={(c) => handleOpenEdit(c)}
+        onScheduleInterview={(c) => setSelectedCandidate(c)}
       />
     </div>
   );
