@@ -14,11 +14,16 @@ import {
   LeadAssignmentHistory,
   CallType,
   LeadCategory,
+  CandidateScreening,
 } from '../types';
 import {
   enqueueMutation,
   processOfflineQueue,
   getQueueMetrics,
+  getDeadLetterMutations,
+  retryDeadLetterMutation,
+  removeDeadLetterMutation,
+  clearDeadLetterQueue,
   QueuedMutation
 } from '../lib/offlineQueue';
 import { toast } from 'react-hot-toast';
@@ -29,6 +34,7 @@ interface DataContextType {
   jobs: Job[];
   applications: Application[];
   interviews: Interview[];
+  screenings: CandidateScreening[];
   callLogs: CallLog[];
   tasks: FollowUpTask[];
   payments: PaymentRecord[];
@@ -45,6 +51,10 @@ interface DataContextType {
   update: (table: string, data: any) => Promise<any>;
   remove: (table: string, id: string) => Promise<any>;
   syncNow: () => Promise<void>;
+  getDeadLetterList: () => Promise<QueuedMutation[]>;
+  retryDeadLetter: (id: string) => Promise<void>;
+  removeDeadLetter: (id: string) => Promise<void>;
+  clearDeadLetter: () => Promise<void>;
   createLeadWithDedup: (leadData: Partial<Lead>) => Promise<{ success: boolean; lead_id?: string; reason?: string; message?: string }>;
   convertLeadToCandidate: (leadId: string, overrides?: any) => Promise<{ success: boolean; candidate_id?: string; idempotent?: boolean; was_existing_candidate?: boolean; message?: string }>;
   createLeadFollowupTask: (leadId: string, taskData: { title: string; due_date?: string; priority?: 'Low' | 'Medium' | 'High'; notes?: string; assigned_to_user_id?: string }) => Promise<{ success: boolean; task_id?: string; idempotent?: boolean; message?: string }>;
@@ -82,6 +92,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [jobs, setJobs] = useState<Job[]>(() => getInitialData('jobs', []));
   const [applications, setApplications] = useState<Application[]>(() => getInitialData('applications', []));
   const [interviews, setInterviews] = useState<Interview[]>(() => getInitialData('interviews', []));
+  const [screenings, setScreenings] = useState<CandidateScreening[]>(() => getInitialData('screenings', []));
   const [callLogs, setCallLogs] = useState<CallLog[]>(() => getInitialData('callLogs', []));
   const [tasks, setTasks] = useState<FollowUpTask[]>(() => getInitialData('tasks', []));
   const [payments, setPayments] = useState<PaymentRecord[]>(() => getInitialData('payments', []));
@@ -102,6 +113,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => { saveToLocalStorage('jobs', jobs); }, [jobs]);
   useEffect(() => { saveToLocalStorage('applications', applications); }, [applications]);
   useEffect(() => { saveToLocalStorage('interviews', interviews); }, [interviews]);
+  useEffect(() => { saveToLocalStorage('screenings', screenings); }, [screenings]);
   useEffect(() => { saveToLocalStorage('callLogs', callLogs); }, [callLogs]);
   useEffect(() => { saveToLocalStorage('tasks', tasks); }, [tasks]);
   useEffect(() => { saveToLocalStorage('payments', payments); }, [payments]);
@@ -148,6 +160,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (leadsRes.data) setLeads(leadsRes.data);
       if (batchesRes.data) setLeadImportBatches(batchesRes.data);
       if (assignRes.data) setLeadAssignmentHistory(assignRes.data);
+
+      // Fetch candidate screenings if candidate_screenings table is available
+      try {
+        const { data: screeningData } = await supabase
+          .from('candidate_screenings')
+          .select('*, candidates(name, mobile)')
+          .eq('is_active', true)
+          .order('screening_time', { ascending: false });
+        if (screeningData) setScreenings(screeningData);
+      } catch {
+        // Graceful fallback if table is pending migration 008
+      }
     } catch (error) {
       console.warn('Remote data fetch failed or tables not yet migrated; using local cache.', error);
     } finally {
@@ -192,8 +216,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Check if the record actually exists remotely
         const { data: remoteExisting } = await supabase.from(mutation.table).select('id').eq('id', entityId).maybeSingle();
         if (!remoteExisting) {
-          // Record was never synced or created remotely; upsert it to prevent silent data loss
-          return await supabase.from(mutation.table).upsert(payload, { onConflict: 'id' });
+          // Record was deleted or not found remotely.
+          // DO NOT resurrect deleted records by upserting! Return RECORD_NOT_FOUND error so it safely transitions to DLQ.
+          return {
+            error: {
+              code: 'RECORD_NOT_FOUND',
+              message: `Record ${entityId} in ${mutation.table} was deleted or not found remotely. Update cannot be applied.`,
+            },
+          };
         }
         return {
           error: {
@@ -220,6 +250,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return; // Single-flight protection: prevent concurrent queue processors
     }
 
+    let currentUserId: string | undefined;
     // Session freshness check: pause sync if session expired or unauthenticated
     if (isSupabaseConfigured) {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -228,6 +259,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await updateQueueStatus();
         return;
       }
+      currentUserId = session.user.id;
     }
 
     isSyncingRef.current = true;
@@ -235,6 +267,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       const result = await processOfflineQueue(executeRemoteMutation, {
+        currentUserId,
         onProgress: async () => {
           await updateQueueStatus();
         },
@@ -326,9 +359,32 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       case 'lead_import_batches': setLeadImportBatches(updateList); break;
       case 'lead_assignment_history': setLeadAssignmentHistory(updateList); break;
       case 'payments':
-        setPayments(updateList);
-        if (record.type === 'Candidate_Registration' && record.candidate_id && record.status === 'Paid') {
-          setCandidates(prev => prev.map(c => c.id === record.candidate_id ? { ...c, registration_fee_paid: true } : c));
+        setPayments((prevPayments) => {
+          const nextPayments = updateList(prevPayments);
+          if (record.type === 'Candidate_Registration' && record.candidate_id) {
+            const candPayments = nextPayments.filter(
+              (p) => p.candidate_id === record.candidate_id && p.type === 'Candidate_Registration' && p.is_active !== false
+            );
+            const net = candPayments.reduce((acc, p) => {
+              if (p.status === 'Paid' || p.status === 'Partial') return acc + (Number(p.amount) || 0);
+              if (p.status === 'Refunded') return acc - (Number(p.amount) || 0);
+              return acc;
+            }, 0);
+            setCandidates((prev) =>
+              prev.map((c) =>
+                c.id === record.candidate_id ? { ...c, registration_fee_paid: net >= 200 } : c
+              )
+            );
+          }
+          return nextPayments;
+        });
+        break;
+      case 'candidate_screenings':
+        setScreenings(updateList);
+        if (record.candidate_id && record.result) {
+          setCandidates(prev =>
+            prev.map(c => (c.id === record.candidate_id ? { ...c, screening_status: record.result } : c))
+          );
         }
         break;
     }
@@ -336,37 +392,75 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Truthful insert: Propagates errors, updates state optimistically if offline
   const insert = useCallback(async (table: string, data: any) => {
+    let currentUserId: string | undefined;
+    if (isSupabaseConfigured) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        currentUserId = session?.user?.id;
+      } catch {}
+    }
+
     const fullRecord = {
       ...data,
       id: data.id || crypto.randomUUID(),
       created_at: data.created_at || new Date().toISOString(),
     };
 
+    // Attribution guard: for tasks and candidate screenings, auto-populate created_by with active user UUID if omitted
+    if ((table === 'tasks' || table === 'candidate_screenings') && !fullRecord.created_by && currentUserId) {
+      fullRecord.created_by = currentUserId;
+    }
+
     if (!navigator.onLine || !isSupabaseConfigured) {
-      // Save locally & queue for remote sync
-      await enqueueMutation(table, 'insert', fullRecord);
+      // Save locally & queue for remote sync with actor userId scoping
+      await enqueueMutation(table, 'insert', fullRecord, { userId: currentUserId });
       applyLocalMutation(table, 'insert', fullRecord);
       await updateQueueStatus();
       return { data: fullRecord, error: null };
     }
 
-    const result = await supabase
-      .from(table)
-      .upsert(fullRecord, { onConflict: 'id', ignoreDuplicates: true })
-      .select()
-      .single();
-    if (result.error) {
-      // Throw error so calling screen DOES NOT show false-success toast!
-      throw new Error(result.error.message || `Failed to insert into ${table}`);
-    }
+    try {
+      const result = await supabase
+        .from(table)
+        .upsert(fullRecord, { onConflict: 'id', ignoreDuplicates: true })
+        .select()
+        .single();
+      if (result.error) {
+        if (table === 'candidate_screenings' && (result.error.code === '42P01' || result.error.message?.includes('does not exist'))) {
+          console.warn('candidate_screenings not yet migrated remotely; storing locally in queue.');
+          await enqueueMutation(table, 'insert', fullRecord);
+          applyLocalMutation(table, 'insert', fullRecord);
+          await updateQueueStatus();
+          return { data: fullRecord, error: null };
+        }
+        // Throw error so calling screen DOES NOT show false-success toast!
+        throw new Error(result.error.message || `Failed to insert into ${table}`);
+      }
 
-    applyLocalMutation(table, 'insert', result.data || fullRecord);
-    return result;
+      applyLocalMutation(table, 'insert', result.data || fullRecord);
+      return result;
+    } catch (err: any) {
+      if (table === 'candidate_screenings' && (err.message?.includes('42P01') || err.message?.includes('does not exist'))) {
+        await enqueueMutation(table, 'insert', fullRecord);
+        applyLocalMutation(table, 'insert', fullRecord);
+        await updateQueueStatus();
+        return { data: fullRecord, error: null };
+      }
+      throw err;
+    }
   }, [applyLocalMutation, updateQueueStatus]);
 
   // Truthful update: Propagates errors, updates state optimistically if offline
   const update = useCallback(async (table: string, data: any) => {
     if (!data.id) throw new Error('Cannot update record without id');
+
+    let currentUserId: string | undefined;
+    if (isSupabaseConfigured) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        currentUserId = session?.user?.id;
+      } catch {}
+    }
 
     const updatedRecord = {
       ...data,
@@ -374,27 +468,71 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     if (!navigator.onLine || !isSupabaseConfigured) {
-      await enqueueMutation(table, 'update', updatedRecord);
+      await enqueueMutation(table, 'update', updatedRecord, {
+        expectedUpdatedAt: data.updated_at,
+        userId: currentUserId,
+      });
       applyLocalMutation(table, 'update', updatedRecord);
       await updateQueueStatus();
       return { data: updatedRecord, error: null };
     }
 
-    const result = await supabase.from(table).update(updatedRecord).eq('id', data.id).select().single();
-    if (result.error) {
-      throw new Error(result.error.message || `Failed to update ${table}`);
-    }
+    try {
+      let result = await supabase.from(table).update(updatedRecord).eq('id', data.id).select().single();
+      if (result.error) {
+        if (table === 'candidate_screenings' && (result.error.code === '42P01' || result.error.message?.includes('does not exist'))) {
+          console.warn('candidate_screenings not yet migrated remotely; updating locally in queue.');
+          await enqueueMutation(table, 'update', updatedRecord);
+          applyLocalMutation(table, 'update', updatedRecord);
+          await updateQueueStatus();
+          return { data: updatedRecord, error: null };
+        }
+        if (table === 'tasks' && result.error.message?.includes('tasks_status_check') && (updatedRecord.status === 'In Progress' || updatedRecord.status === 'Waiting')) {
+          // Backward-compatibility if tasks_status_check not yet expanded on Supabase:
+          const fallbackRecord = {
+            ...updatedRecord,
+            status: 'Pending',
+            notes: updatedRecord.notes
+              ? `${updatedRecord.notes} [Kanban: ${updatedRecord.status}]`
+              : `[Kanban: ${updatedRecord.status}]`,
+          };
+          result = await supabase.from('tasks').update(fallbackRecord).eq('id', data.id).select().single();
+          if (result.error) {
+            throw new Error(result.error.message || `Failed to update ${table}`);
+          }
+          applyLocalMutation(table, 'update', { ...(result.data || updatedRecord), kanban_status: updatedRecord.status });
+          return result;
+        }
+        throw new Error(result.error.message || `Failed to update ${table}`);
+      }
 
-    applyLocalMutation(table, 'update', result.data || updatedRecord);
-    return result;
+      applyLocalMutation(table, 'update', result.data || updatedRecord);
+      return result;
+    } catch (err: any) {
+      if (table === 'candidate_screenings' && (err.message?.includes('42P01') || err.message?.includes('does not exist'))) {
+        await enqueueMutation(table, 'update', updatedRecord);
+        applyLocalMutation(table, 'update', updatedRecord);
+        await updateQueueStatus();
+        return { data: updatedRecord, error: null };
+      }
+      throw err;
+    }
   }, [applyLocalMutation, updateQueueStatus]);
 
   // Truthful remove: Propagates errors
   const remove = useCallback(async (table: string, id: string) => {
     if (!id) throw new Error('Cannot remove record without id');
 
+    let currentUserId: string | undefined;
+    if (isSupabaseConfigured) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        currentUserId = session?.user?.id;
+      } catch {}
+    }
+
     if (!navigator.onLine || !isSupabaseConfigured) {
-      await enqueueMutation(table, 'delete', { id });
+      await enqueueMutation(table, 'delete', { id }, { userId: currentUserId });
       applyLocalMutation(table, 'delete', { id });
       await updateQueueStatus();
       return { error: null };
@@ -728,6 +866,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       jobs,
       applications,
       interviews,
+      screenings,
       callLogs,
       tasks,
       payments,
@@ -744,6 +883,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       update,
       remove,
       syncNow,
+      getDeadLetterList: async () => await getDeadLetterMutations(),
+      retryDeadLetter: async (id: string) => {
+        await retryDeadLetterMutation(id);
+        await updateQueueStatus();
+      },
+      removeDeadLetter: async (id: string) => {
+        await removeDeadLetterMutation(id);
+        await updateQueueStatus();
+      },
+      clearDeadLetter: async () => {
+        await clearDeadLetterQueue();
+        await updateQueueStatus();
+      },
       createLeadWithDedup,
       convertLeadToCandidate,
       createLeadFollowupTask,

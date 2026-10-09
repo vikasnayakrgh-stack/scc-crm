@@ -403,7 +403,7 @@ export default function Interviews() {
       <CandidateProfileDrawer
         isOpen={Boolean(selectedProfileCandidate)}
         onClose={() => setSelectedProfileCandidate(null)}
-        candidate={selectedProfileCandidate}
+        candidate={candidates.find((c) => c.id === selectedProfileCandidate?.id) || selectedProfileCandidate}
       />
     </div>
   );

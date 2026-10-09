@@ -40,7 +40,10 @@ export const ClientProfileDrawer: React.FC<ClientProfileDrawerProps> = ({
   onEditEmployer,
   onOpenCandidateProfile,
 }) => {
-  const { jobs, interviews, candidates, update } = useData();
+  const { employers, jobs, interviews, candidates, update } = useData();
+
+  // Resolve active employer from DataContext for live reactivity and refresh persistence
+  const activeEmployer = employers.find((e) => e.id === employer?.id) || employer;
 
   const [activeTab, setActiveTab] = useState<'overview' | 'interviews' | 'jobs'>('overview');
   const [clientNotes, setClientNotes] = useState('');
@@ -56,20 +59,20 @@ export const ClientProfileDrawer: React.FC<ClientProfileDrawerProps> = ({
   const [editingInterview, setEditingInterview] = useState<Interview | null>(null);
 
   React.useEffect(() => {
-    if (employer) {
-      setClientNotes(employer.notes || '');
+    if (activeEmployer) {
+      setClientNotes(activeEmployer.notes || '');
       setIsEditingNotes(false);
       setPositionFilter('All');
       setStatusFilter('All');
       setCandidateSearch('');
     }
-  }, [employer]);
+  }, [activeEmployer?.id, activeEmployer?.notes]);
 
-  if (!employer) return null;
+  if (!activeEmployer) return null;
 
   // Jobs belonging to this employer
   const clientJobs = jobs.filter(
-    (j) => (j.employer_id === employer.id || j.company_name === employer.company_name) && j.is_active !== false
+    (j) => (j.employer_id === activeEmployer.id || j.company_name === activeEmployer.company_name) && j.is_active !== false
   );
   const clientJobIds = new Set(clientJobs.map((j) => j.id));
 
@@ -116,14 +119,18 @@ export const ClientProfileDrawer: React.FC<ClientProfileDrawerProps> = ({
   const totalPending = clientInterviews.filter((i) => i.status === 'Scheduled' || (i.status === 'Done' && !i.feedback)).length;
 
   const handleSaveNotes = async () => {
+    if (!activeEmployer) return;
     setIsSavingNotes(true);
     try {
-      await update('employers', {
-        id: employer.id,
+      const res = await update('employers', {
+        id: activeEmployer.id,
         notes: clientNotes.trim() || null,
       });
-      toast.success('Client notes updated!');
+      toast.success('Client notes saved successfully!');
       setIsEditingNotes(false);
+      if (onEditEmployer && res?.data) {
+        onEditEmployer(res.data);
+      }
     } catch (err: any) {
       toast.error(err?.message || 'Failed to update client notes');
     } finally {
@@ -170,14 +177,14 @@ export const ClientProfileDrawer: React.FC<ClientProfileDrawerProps> = ({
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-1.5">
                   <Building2 size={18} className="text-blue-600" />
-                  {employer.company_name}
+                  {activeEmployer.company_name}
                 </h2>
-                <Badge variant={employer.status === 'Active' ? 'success' : 'neutral'}>
-                  {employer.status}
+                <Badge variant={activeEmployer.status === 'Active' ? 'success' : 'neutral'}>
+                  {activeEmployer.status}
                 </Badge>
               </div>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Contact: {employer.contact_person} {employer.industry ? `• ${employer.industry}` : ''} • {employer.location}
+                Contact: {activeEmployer.contact_person} {activeEmployer.industry ? `• ${activeEmployer.industry}` : ''} • {activeEmployer.location}
               </p>
             </div>
           </div>
@@ -186,14 +193,14 @@ export const ClientProfileDrawer: React.FC<ClientProfileDrawerProps> = ({
           <>
             <div className="flex items-center gap-2 text-xs">
               <a
-                href={`tel:${employer.phone}`}
+                href={`tel:${activeEmployer.phone}`}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium flex items-center gap-1"
               >
                 <Phone size={13} className="text-blue-600" /> Call HR
               </a>
-              {employer.email && (
+              {activeEmployer.email && (
                 <a
-                  href={`mailto:${employer.email}`}
+                  href={`mailto:${activeEmployer.email}`}
                   className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium flex items-center gap-1"
                 >
                   <Mail size={13} className="text-slate-600" /> Email
@@ -206,7 +213,7 @@ export const ClientProfileDrawer: React.FC<ClientProfileDrawerProps> = ({
                 size="sm"
                 onClick={() => {
                   onClose();
-                  onEditEmployer(employer);
+                  onEditEmployer(activeEmployer);
                 }}
                 className="flex items-center gap-1"
               >
@@ -282,7 +289,7 @@ export const ClientProfileDrawer: React.FC<ClientProfileDrawerProps> = ({
                 {!isEditingNotes ? (
                   <button
                     onClick={() => setIsEditingNotes(true)}
-                    className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 hover:underline"
+                    className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 hover:underline cursor-pointer"
                   >
                     <Pencil size={12} /> Edit Notes
                   </button>
@@ -290,17 +297,17 @@ export const ClientProfileDrawer: React.FC<ClientProfileDrawerProps> = ({
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => {
-                        setClientNotes(employer.notes || '');
+                        setClientNotes(activeEmployer.notes || '');
                         setIsEditingNotes(false);
                       }}
-                      className="text-xs text-slate-500 hover:text-slate-700 font-medium px-2 py-0.5"
+                      className="text-xs text-slate-500 hover:text-slate-700 font-medium px-2 py-0.5 cursor-pointer"
                     >
                       Cancel
                     </button>
                     <button
                       onClick={handleSaveNotes}
                       disabled={isSavingNotes}
-                      className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-0.5 rounded font-medium flex items-center gap-1"
+                      className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-0.5 rounded font-medium flex items-center gap-1 cursor-pointer disabled:opacity-60"
                     >
                       <Save size={12} /> {isSavingNotes ? 'Saving...' : 'Save'}
                     </button>
@@ -315,14 +322,14 @@ export const ClientProfileDrawer: React.FC<ClientProfileDrawerProps> = ({
                     value={clientNotes}
                     onChange={(e) => setClientNotes(e.target.value)}
                     placeholder="e.g. Hiring for accounts and billing department. Prefers local Raipur candidates. Salary budget ₹25,000 max..."
-                    className="w-full text-xs border border-slate-300 rounded-lg p-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full text-xs border border-slate-300 rounded-lg p-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                   />
                 </div>
               ) : (
                 <div className="mt-1">
-                  {employer.notes ? (
-                    <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed font-normal">
-                      {employer.notes}
+                  {activeEmployer.notes ? (
+                    <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed font-normal bg-white p-3 rounded-lg border border-slate-200/70">
+                      {activeEmployer.notes}
                     </p>
                   ) : (
                     <p className="text-xs text-slate-400 italic">
@@ -341,27 +348,27 @@ export const ClientProfileDrawer: React.FC<ClientProfileDrawerProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div>
                   <span className="text-slate-400 block">Primary Contact Person</span>
-                  <span className="font-semibold text-slate-800">{employer.contact_person}</span>
+                  <span className="font-semibold text-slate-800">{activeEmployer.contact_person}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block">Phone / Mobile</span>
-                  <span className="font-mono font-semibold text-slate-800">{employer.phone}</span>
+                  <span className="font-mono font-semibold text-slate-800">{activeEmployer.phone}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block">Email Address</span>
-                  <span className="font-medium text-slate-800">{employer.email || '—'}</span>
+                  <span className="font-medium text-slate-800">{activeEmployer.email || '—'}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block">Location / City</span>
-                  <span className="font-medium text-slate-800">{employer.location}</span>
+                  <span className="font-medium text-slate-800">{activeEmployer.location}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block">Industry</span>
-                  <span className="font-medium text-slate-800">{employer.industry || '—'}</span>
+                  <span className="font-medium text-slate-800">{activeEmployer.industry || '—'}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block">Address</span>
-                  <span className="font-medium text-slate-800">{employer.address || '—'}</span>
+                  <span className="font-medium text-slate-800">{activeEmployer.address || '—'}</span>
                 </div>
               </div>
             </div>

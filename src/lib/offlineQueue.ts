@@ -1,5 +1,6 @@
 export interface QueuedMutation {
   id: string;
+  userId?: string;
   entityId?: string;
   table: string;
   type: 'insert' | 'update' | 'delete';
@@ -53,7 +54,7 @@ export const enqueueMutation = async (
   table: string,
   type: 'insert' | 'update' | 'delete',
   data: any,
-  options?: { expectedUpdatedAt?: string }
+  options?: { expectedUpdatedAt?: string; userId?: string }
 ): Promise<QueuedMutation> => {
   const db = await getOfflineDb();
   const entityId = data?.id || crypto.randomUUID();
@@ -61,6 +62,7 @@ export const enqueueMutation = async (
   const mutationId = data?._mutationId || data?.id || crypto.randomUUID();
   const mutation: QueuedMutation = {
     id: mutationId,
+    userId: options?.userId,
     entityId,
     table,
     type,
@@ -233,7 +235,23 @@ export const getQueueMetrics = async (): Promise<{ pending: number; deadLetter: 
   }
 };
 
-// Check if an error is permanent (constraint, schema, concurrency, or authorization error)
+// Helper to identify unmigrated tables, missing columns, or pending schema cache refreshes
+export const isMissingTableOrSchemaError = (error: any): boolean => {
+  if (!error) return false;
+  const code = String(error.code || '');
+  const msg = String(error.message || '').toLowerCase();
+  return (
+    code === '42P01' ||
+    code === '42703' ||
+    code === 'PGRST204' ||
+    code === 'PGRST205' ||
+    msg.includes('does not exist') ||
+    msg.includes('could not find the table') ||
+    msg.includes('schema cache')
+  );
+};
+
+// Check if an error is permanent (constraint, concurrency, or authorization error)
 export const isPermanentError = (error: any): boolean => {
   if (!error) return false;
   const code = String(error.code || '');
@@ -252,10 +270,27 @@ export const isPermanentError = (error: any): boolean => {
     return false;
   }
 
-  // Concurrency conflict (OCC): permanent conflict that requires manual resolution
+  // Missing table/column or schema cache errors: transient infrastructure / pending migration state.
+  // NEVER permanent on initial attempt: must allow retry with exponential backoff so that when the
+  // migration is applied, pending mutations sync automatically. If retries exhaust (5 attempts),
+  // handleTransientRetry safely routes to DLQ to prevent infinite loops.
+  if (isMissingTableOrSchemaError(error)) {
+    return false;
+  }
+
+  // Concurrency conflict (OCC): permanent conflict that requires manual review
   if (code === 'CONCURRENCY_CONFLICT' || msg.includes('conflict')) return true;
 
-  // PostgreSQL unique violation: 23505, foreign key violation: 23503, not null: 23502
+  // Record not found (e.g. deleted record update replay): permanent -> DLQ
+  if (
+    code === 'RECORD_NOT_FOUND' ||
+    msg.includes('record not found') ||
+    msg.includes('deleted or not found remotely')
+  ) {
+    return true;
+  }
+
+  // PostgreSQL unique violation: 23505, foreign key violation: 23503, not null: 23502, check violation: 23514
   // Genuine RLS permission denied: 42501 (when session is active)
   if (code.startsWith('23') || code === '42501' || code === 'PGRST') return true;
   if (msg.includes('duplicate') || msg.includes('violates') || msg.includes('permission denied')) return true;
@@ -285,7 +320,7 @@ const handleTransientRetry = async (
   }
 };
 
-// Concurrency guarded queue processor with persisted retry count and exponential backoff
+// Concurrency guarded queue processor with persisted retry count, exponential backoff, and actor scoping
 export const processOfflineQueue = async (
   executor: (mutation: QueuedMutation) => Promise<{ error: any }>,
   options?: {
@@ -293,6 +328,7 @@ export const processOfflineQueue = async (
     baseDelayMs?: number;
     maxDelayMs?: number;
     skipBackoffCheck?: boolean;
+    currentUserId?: string;
     onProgress?: () => Promise<void> | void;
   }
 ): Promise<{ processed: number; failed: number; deadLettered: number }> => {
@@ -314,6 +350,12 @@ export const processOfflineQueue = async (
     for (const mutation of queue) {
       if (!isOnline()) break; // Network lost mid-sync
 
+      // Actor scoping guard: never replay another user's mutation under the current user's session
+      if (mutation.userId && options?.currentUserId && mutation.userId !== options.currentUserId) {
+        // Skip this mutation until the authoring user logs in
+        continue;
+      }
+
       // Backoff check: skip items still in backoff cooldown unless explicitly skipped
       if (!options?.skipBackoffCheck && !isMutationReadyForRetry(mutation, now, baseDelayMs, maxDelayMs)) {
         continue;
@@ -329,8 +371,8 @@ export const processOfflineQueue = async (
             try { await options.onProgress(); } catch {}
           }
         } else if (isPermanentError(error)) {
-          // Permanent constraint error -> Move to Dead Letter Queue to avoid head-of-line blocking!
-          await moveToDeadLetterQueue(mutation, error.message || 'Constraint error');
+          // Permanent constraint or missing-record error -> Move to Dead Letter Queue to avoid head-of-line blocking!
+          await moveToDeadLetterQueue(mutation, error.message || 'Permanent error');
           deadLettered++;
           if (options?.onProgress) {
             try { await options.onProgress(); } catch {}
@@ -372,4 +414,107 @@ export const processOfflineQueue = async (
   }
 
   return { processed, failed, deadLettered };
+};
+
+// Retrieve all items currently in the Dead Letter Queue
+export const getDeadLetterMutations = async (): Promise<QueuedMutation[]> => {
+  const db = await getOfflineDb();
+  return new Promise((resolve) => {
+    const tx = db.transaction(DEAD_LETTER_STORE, 'readonly');
+    const store = tx.objectStore(DEAD_LETTER_STORE);
+    const req = store.getAll();
+    req.onsuccess = () => {
+      const items = (req.result as QueuedMutation[]) || [];
+      items.sort((a, b) => (b.lastAttemptAt || 0) - (a.lastAttemptAt || 0));
+      resolve(items);
+    };
+    req.onerror = () => resolve([]);
+  });
+};
+
+// Remove a specific mutation from the Dead Letter Queue
+export const removeDeadLetterMutation = async (id: string): Promise<void> => {
+  const db = await getOfflineDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DEAD_LETTER_STORE, 'readwrite');
+    const store = tx.objectStore(DEAD_LETTER_STORE);
+    const req = store.delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(tx.error);
+  });
+};
+
+// Retry a dead-letter mutation by moving it back to the pending mutation queue
+export const retryDeadLetterMutation = async (id: string): Promise<void> => {
+  const db = await getOfflineDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([QUEUE_STORE, DEAD_LETTER_STORE], 'readwrite');
+    const queueStore = tx.objectStore(QUEUE_STORE);
+    const dlqStore = tx.objectStore(DEAD_LETTER_STORE);
+
+    const getReq = dlqStore.get(id);
+    getReq.onsuccess = () => {
+      const item = getReq.result as QueuedMutation | undefined;
+      if (!item) {
+        resolve();
+        return;
+      }
+
+      const revivedItem: QueuedMutation = {
+        ...item,
+        status: 'pending',
+        retryCount: 0,
+        lastAttemptAt: undefined,
+        errorMessage: undefined,
+      };
+
+      dlqStore.delete(id);
+      queueStore.put(revivedItem);
+    };
+
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+};
+
+// Clear all dead letter records
+export const clearDeadLetterQueue = async (): Promise<void> => {
+  const db = await getOfflineDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DEAD_LETTER_STORE, 'readwrite');
+    const store = tx.objectStore(DEAD_LETTER_STORE);
+    const req = store.clear();
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(tx.error);
+  });
+};
+
+// Revive all dead-letter mutations for a specific table once a migration has been applied remotely
+export const retryDeadLetterMutationsForTable = async (table: string): Promise<number> => {
+  const db = await getOfflineDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([QUEUE_STORE, DEAD_LETTER_STORE], 'readwrite');
+    const queueStore = tx.objectStore(QUEUE_STORE);
+    const dlqStore = tx.objectStore(DEAD_LETTER_STORE);
+
+    const getAllReq = dlqStore.getAll();
+    getAllReq.onsuccess = () => {
+      const items = (getAllReq.result as QueuedMutation[]) || [];
+      const matching = items.filter((item) => item.table === table);
+      matching.forEach((item) => {
+        const revived: QueuedMutation = {
+          ...item,
+          status: 'pending',
+          retryCount: 0,
+          lastAttemptAt: undefined,
+          errorMessage: undefined,
+        };
+        dlqStore.delete(item.id);
+        queueStore.put(revived);
+      });
+      resolve(matching.length);
+    };
+    getAllReq.onerror = () => reject(getAllReq.error);
+    tx.onerror = () => reject(tx.error);
+  });
 };

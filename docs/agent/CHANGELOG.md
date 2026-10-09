@@ -41,6 +41,174 @@
 
 ## Historical Changelog
 
+### [2026-10-09] Final Pre-Release Defect Correction: Refund Accounting, Screening RLS, Offline Queue Recovery & Test Modernization
+- **Task Reference:** SCC CRM — Final Pre-Release Defect Correction
+- **Agent Model / ID:** Principal Supabase/PostgreSQL Engineer, QA Architect & Full-Stack Specialist
+- **Scope:** Registration Refund Accounting Model, Screening Precision & RLS Authorization, Offline Queue Error Classification & DLQ Revival, Production Module Test Modernization (Tasks 1-5)
+
+#### 1. Rationale & Problem Description
+- **Task 1 (Registration Refund Compatibility & Accounting Model):**
+  - Mismatch: Database `payment_records.amount` enforces `CHECK (amount >= 0)`, while the frontend previously lacked a reconciled multi-transaction ledger for candidate registration fees.
+  - Fix: Implemented dual-ledger audit model in `src/lib/registrationFee.ts` where refunds are recorded as positive audit entries with `status = 'Refunded'`.
+  - Reconciled calculations: Net Received = $\sum(\text{Paid} + \text{Partial}) - \sum(\text{Refunded})$; Refunded Amount = $\sum(\text{Refunded})$; Outstanding = $\max(0, 200 - \text{Net Received})$.
+  - Database trigger: Prepared Migration 008 with updated `trg_sync_candidate_registration_fee()` that recalculates candidate `registration_fee_paid` as a boolean evaluated dynamically on net received $\ge 200$, preventing candidate status corruption when refunds occur.
+  - UI protection: Implemented strict client-side over-refund validation (`validateRegistrationRefund`), maximum refundable ceiling enforcement, and duplicate refund prevention in `CandidateProfileDrawer.tsx`.
+- **Task 2 (Office Screening Schema & Hardened RLS):**
+  - Data Precision: `candidate_screenings.overall_rating` set to `numeric(3,1)` supporting fractional ratings (e.g., 4.5).
+  - Attribution Immutability: `candidate_screenings.created_by` configured with `DEFAULT auth.uid()` and backed by immutable `BEFORE INSERT` trigger `trg_screenings_set_created_by`.
+  - RLS Security: Audited and separated SELECT, INSERT, UPDATE, DELETE policies on `candidate_screenings` to require `profiles.is_active = true` and appropriate role authorization without any `USING (true)` shortcuts.
+  - Screening eligibility helper: Created `src/lib/screeningHelpers.ts` (`isCandidateClientEligible`, `validateScreeningRatings`) to guarantee candidates with failed/held screenings cannot be scheduled for client interviews without explicit confirmation.
+- **Task 3 (Offline Queue Missing-Table Recovery & DLQ Protection):**
+  - Root Cause: Missing table error (`42P01`) and related PostgREST schema cache errors (`42703`, `PGRST204`, `PGRST205`) were incorrectly treated as fatal unrecoverable errors on attempt 1, immediately trapping unmigrated operations in the Dead Letter Queue.
+  - Fix: Updated `isPermanentError` in `src/lib/offlineQueue.ts` to return `false` for missing tables/schema cache errors, allowing them to remain in the active queue with exponential backoff retries until migrations are deployed.
+  - Recovery API: Added `retryDeadLetterMutationsForTable(tableName)` to safely revive any historical mutations quarantined in DLQ once schema migrations land.
+  - Duplicate Protection: Guaranteed idempotency via conflict key matching during online flush and local mutation tracking.
+- **Task 4 (Production Test Suite Modernization):**
+  - Root Cause: `src/__tests__/recruitmentWorkflowEnhancements.test.ts` previously defined local duplicate dummy helper functions instead of importing real production modules.
+  - Fix: Completely overhauled the test file with 31 comprehensive integration tests directly importing production modules: `src/lib/registrationFee.ts`, `src/lib/screeningHelpers.ts`, `src/lib/pipelineHelpers.ts`, `src/lib/taskHelpers.ts`, and `src/lib/offlineQueue.ts`.
+  - Test coverage expanded to full refund, partial refund, multiple payments, over-refund protection, duplicate refund attempts, missing-table backoff retries, and migration-applied sync recovery.
+- **Task 5 (Quality Verification & Ledger Integrity):**
+  - All 246 tests across 15 test files passing cleanly. Zero TypeScript errors. Production build verified. Zero production database modifications executed.
+
+#### 2. Affected Files
+- `src/lib/registrationFee.ts` (Created: Pure business logic for candidate registration ledger & refund validation)
+- `src/lib/screeningHelpers.ts` (Created: Screening rating validation & client interview eligibility logic)
+- `src/lib/taskHelpers.ts` (Created: Kanban column mapping & overdue date helpers)
+- `src/lib/pipelineHelpers.ts` (Modified: Active job opening filtering for employer modal)
+- `src/lib/offlineQueue.ts` (Modified: Missing-table error classification fix & `retryDeadLetterMutationsForTable`)
+- `src/context/DataContext.tsx` (Modified: Local state reconciliation for payments & candidate registration status)
+- `src/components/CandidateProfileDrawer.tsx` (Modified: Integrated `registrationFee` validation, over-refund guard & max refund display)
+- `src/components/ScheduleInterviewModal.tsx` (Modified: Integrated `screeningHelpers` and `pipelineHelpers`)
+- `src/screens/Tasks.tsx` (Modified: Integrated `taskHelpers` for Kanban status resolution)
+- `supabase/migrations/20261009000008_office_screening_and_reschedule_history.sql` (Modified: Hardened rating precision, trigger, constraint & RLS)
+- `src/__tests__/recruitmentWorkflowEnhancements.test.ts` (Rewritten: 31 real production integration tests)
+- `src/__tests__/migrationSafetyAndRemediation.test.ts` (Modified: Updated for transient missing-table backoff)
+- `src/__tests__/remediationPhase1.test.ts` (Modified: Aligned error expectations for unmigrated schema)
+- `SCC_PRE_RELEASE_VERIFICATION.md` (Updated: Final verification evidence & defect scorecard)
+- `KNOWN_ISSUES.md` (Updated: Added ISSUE-025 and ISSUE-026)
+- `docs/agent/CHANGELOG.md` (Updated: Recorded pre-release defect correction entry)
+
+#### 3. Verification & Testing Evidence
+- **Vitest Automated Suite:** `npm test -- --run` -> **15 test files passed, 246/246 tests passed (100%)**
+- **TypeScript Strictness:** `tsc --noEmit` -> **0 errors across entire workspace**
+- **Production Build:** `npm run build` -> **Built cleanly without errors or bundle warnings**
+- **Database Safety:** Zero SQL executed against live Supabase `zshihpvmtvwsbwrjpugy`. All migrations remain local.
+
+---
+
+### [2026-10-09] Preflight Remediation: Migration 008/009 Security & Regression Hardening
+- **Task Reference:** SCC CRM — Migration 008/009 Remediation Before Production
+- **Agent Model / ID:** Principal Supabase Engineer & Security-Focused Full-Stack Developer
+- **Scope:** Database Migration Hardening, RLS Active Profile Checks, Trigger Privilege Hardening, Decimal Rating Support, Fee Refund Constraint, Test Suite Expansion
+
+#### 1. Rationale & Problem Description
+- Remediated draft Migration 008 security vulnerabilities: Replaced `USING (true)` and unrestricted update policy with strict `profiles.is_active = true` guards and creator/manager update restrictions. Set `created_by DEFAULT auth.uid()`.
+- Fixed data type mismatch: Changed `overall_rating` from `integer` to `numeric(3,1)` to support fractional ratings like 4.5.
+- Fixed database constraint conflict: Expanded `payment_records_status_check` to include `'Refunded'`, enabling candidate registration fee refunds.
+- Remediated Migration 009 function privileges: Added `REVOKE ALL ON FUNCTION ... FROM anon, public` and `GRANT EXECUTE ... TO authenticated` per AGENTS.md Constitution Section C.2.
+- Added client-side defense-in-depth: Expanded `DataContext.insert` attribution guard to auto-inject `created_by` for `candidate_screenings`.
+- Added comprehensive test suite: Created `src/__tests__/migrationSafetyAndRemediation.test.ts` (31 new tests).
+
+#### 2. Affected Files
+- `supabase/migrations/20261009000008_office_screening_and_reschedule_history.sql` (Modified: RLS active checks, update restrictions, numeric rating, refund constraint, attribution default)
+- `supabase/migrations/20261009000009_tasks_attribution_and_candidate_visibility.sql` (Modified: Privilege revocation and execution grant per AGENTS.md Section C.2)
+- `src/context/DataContext.tsx` (Modified: Auto-populate created_by for candidate_screenings in insert)
+- `src/__tests__/migrationSafetyAndRemediation.test.ts` (Created: 31 tests covering active vs inactive access, unauthorized updates, creator attribution, decimal ratings, refund status, anti-spoofing trigger, candidate permissions)
+- `SCC_MIGRATION_SAFETY_REVIEW.md` (Modified: Upgraded to v4.0.0 with remediated SQL and 230 test proofs)
+- `SCC_RELEASE_READINESS_CHECKLIST.md` (Modified: Upgraded to v4.0.0 with remediated statuses and approval gates)
+- `KNOWN_ISSUES.md` (Modified: Added ISSUE-022 through ISSUE-024)
+
+#### 3. Verification & Testing Evidence
+- **Vitest Automated Suite:** `npm test -- --run` -> **15 passed test files, 230/230 tests passed (100% pass rate)** in 3.74s
+- **TypeScript Strictness:** `npm run typecheck` (`tsc --noEmit`) -> **0 errors across 2,387 modules**
+- **Production Build:** `npm run build` -> **cleanly built in 29.91s**
+- **Remote Database Verification:** Read-only inspection confirmed migrations 008 and 009 remain 100% unapplied on live Supabase `zshihpvmtvwsbwrjpugy`.
+
+---
+
+### [2026-10-09] Phase 1: Critical Persistence & Production Access Remediation
+- **Task Reference:** SCC CRM — Evidence-Driven Remediation & Production Reliability (Phase 1)
+- **Agent Model / ID:** Principal Full-Stack Engineer, Supabase/PostgreSQL Security Specialist & Recruitment Workflow Architect
+- **Scope:** Application Code Hardening, Authentication & Inactive Access Guard, Offline Mutation Safety & DLQ Recovery, Task Attribution, Test Suite Expansion
+
+#### 1. Rationale & Problem Description
+- Resolved P0 frontline task creation failure: `tasks.created_by` previously failed RLS (42501) for recruiters due to missing attribution in payload. Fixed in `Tasks.tsx` (`created_by: userId`), `DataContext.insert` auto-injection from active auth session, and prepared Migration 009 setting `tasks.created_by DEFAULT auth.uid()`.
+- Resolved P1 offline concurrency control update resurrection: `DataContext.tsx` previously upserted records when OCC lookup returned zero rows and remote record was absent, resurrecting server-deleted records. Fixed to return `RECORD_NOT_FOUND` error, which `isPermanentError` safely routes to the Dead Letter Queue.
+- Resolved P1 offline queue actor scoping and DLQ recovery: Added `userId` scoping to queued mutations, skipped foreign-user mutations in `processOfflineQueue`, and implemented DLQ management APIs (`getDeadLetterMutations`, `retryDeadLetterMutation`, `removeDeadLetterMutation`, `clearDeadLetterQueue`).
+- Resolved P1 inactive account access bypass: Updated `App.tsx` auth guard to verify `profile.is_active !== false` and `profile !== null`, rendering a secure blocking screen with primary owner contact (`vikasnayakrgh@gmail.com`).
+- Resolved P2 lead call follow-up time loss and untruthful candidate call logging: Preserved `autoFollowupTime` in task title and notes, sent atomic `{ id, category }` updates in `Leads.tsx`, and implemented interactive outcome modal (`Connected`, `Busy`, `No Answer`, `SwitchOff`, etc.) in `CandidateProfileDrawer.tsx`.
+
+#### 2. Affected Files
+- `src/lib/offlineQueue.ts` (Modified: Actor scoping, permanent error classification for RECORD_NOT_FOUND and missing schema, DLQ management methods)
+- `src/context/DataContext.tsx` (Modified: Deleted record resurrection prevention on OCC updates, task created_by auto-injection, DLQ methods exposed)
+- `src/screens/Tasks.tsx` (Modified: Explicit created_by binding from useUser)
+- `src/screens/Leads.tsx` (Modified: Atomic category update payload, follow-up time preservation in task title/notes)
+- `src/components/CandidateProfileDrawer.tsx` (Modified: Truthful call outcome modal replacing automatic Connected insert)
+- `src/App.tsx` (Modified: Inactive profile and missing profile blocking screens)
+- `src/__tests__/remediationPhase1.test.ts` (Created: 12 comprehensive unit and integration tests)
+- `src/__tests__/recruitmentWorkflowEnhancements.test.ts` (Modified: Fully aligned types with strict compiler check)
+- `supabase/migrations/20261009000009_tasks_attribution_and_candidate_visibility.sql` (Created: Reviewed migration, unapplied pending owner approval)
+- `SCC_REMEDIATION_CHANGELOG.md` (Created: Detailed remediation changelog)
+- `KNOWN_ISSUES.md` (Modified: Added ISSUE-017 through ISSUE-021)
+
+#### 3. Verification & Testing Evidence
+- **Vitest Automated Suite:** `npm test -- --run` -> **14 passed test files, 199/199 tests passed (100%)**
+- **Strict TypeScript Check:** `npm run typecheck` (`tsc --noEmit`) -> **0 errors**
+- **Production Build:** `npm run build` (`vite build`) -> **Built in 9.41s cleanly (`dist/`)**
+- **Migration Status:** Migration 008 and 009 held unapplied locally; zero remote mutations executed.
+
+---
+
+### [2026-10-09] Recruitment Workflow & Production Defect Fixes (Screening, Fees, Scheduling, Reschedule History, Kanban, Phone Copy)
+- **Task Reference:** SCC CRM — Production Bug Fixes & Recruitment Workflow Implementation
+- **Agent Model / ID:** Senior Full-Stack Engineer & Recruitment Workflow Architect
+- **Scope:** Frontend Application Fixes, Recruitment Workflows, Test Suite Expansion, Schema Migration 008 Preparation
+
+#### 1. Rationale & Problem Description
+- Diagnosed authentication for owner/admin email `vikasnayakrgh@gmail.com` against Supabase Auth (confirmed missing user in Supabase Auth, proposed safe invite/reset route).
+- Fixed Candidate Profile Remarks & Client Profile Notes stale prop bug in drawers; edits now persist immediately and reflect in UI without reload.
+- Implemented in-house Office Screening module with 1-5 ratings, Pass/Hold/Fail results, round history preservation, and client-readiness guard.
+- Implemented Registration Fee tracking (Unpaid, Partial, Paid, Refunded) with expected vs received vs outstanding fee calculations and payment history modal.
+- Implemented Candidate-to-Client Interview Scheduling modal with dynamic employer selection, filtered job openings, and screening eligibility verification.
+- Implemented Interview Rescheduling with auditable `reschedule_history` JSONB array, prominent current date display, and reschedule reason.
+- Removed unnecessary Show/Hide Number toggle in Leads; numbers now display directly with tap-to-copy, clipboard feedback, and safe fallback.
+- Implemented full 4-column Tasks & Follow-ups Kanban board (To Do -> In Progress -> Waiting -> Completed) with edit modal, next action tracking, priority filters, and mobile move controls.
+- Prepared Migration 008 (`20261009000008_office_screening_and_reschedule_history.sql`) locally, held unapplied pending operator authorization.
+
+#### 2. Affected Files
+- `src/types.ts` (Modified: Added CandidateScreening, RescheduleEvent, TaskKanbanStatus, updated Candidate, Interview, FollowUpTask, PaymentRecord)
+- `src/context/DataContext.tsx` (Modified: Added screenings state, local-first fallback, status mapping compatibility)
+- `src/components/CandidateProfileDrawer.tsx` (Modified: Live context candidate resolution, Office Screening tab, Registration Fee tab, Schedule Interview integration)
+- `src/components/ClientProfileDrawer.tsx` (Modified: Live context employer resolution, notes saving feedback)
+- `src/components/InterviewUpdateModal.tsx` (Modified: Reschedule history logging, reason input, prominent current date)
+- `src/components/ScheduleInterviewModal.tsx` (Created: Dynamic client/job selection modal)
+- `src/screens/Candidates.tsx` (Modified: Live candidate references for drawers and scheduling)
+- `src/screens/Employers.tsx` (Modified: Live employer & candidate references for drawers)
+- `src/screens/Interviews.tsx` (Modified: Live candidate references)
+- `src/screens/Leads.tsx` (Modified: Direct phone display, tap-to-copy handler with clipboard fallback)
+- `src/screens/Tasks.tsx` (Modified: 4-column Kanban board, status transitions, next action edit modal)
+- `src/__tests__/recruitmentWorkflowEnhancements.test.ts` (Created: 15 automated regression tests)
+- `supabase/migrations/20261009000008_office_screening_and_reschedule_history.sql` (Created: Pending operator approval)
+- `KNOWN_ISSUES.md` (Modified: Added ISSUE-013 through ISSUE-016)
+
+#### 3. Architectural & Business Invariants Impacted
+- Preserved Selection ≠ Placed invariant.
+- Preserved Hot Leads = Never Called invariant.
+- Preserved existing payment records and financial reconciliation.
+- Decoupled runtime application state from pending database migration (graceful fallback in DataContext).
+
+#### 4. Verification & Testing Evidence
+- **Automated Tests:** `npm test -- --run` -> `187 passed across 13 test files` (100% clean).
+- **TypeScript Strictness:** `npm run typecheck` (`tsc --noEmit`) -> `0 errors` (100% clean).
+- **Production Build:** `npm run build` -> `built in 16.05s` with 0 errors.
+
+#### 5. Unresolved Risks & Operational Notes
+- Supabase Migration 008 is strictly pending operator approval before deployment.
+- Initial login for `vikasnayakrgh@gmail.com` requires an invite or creation in Supabase Auth.
+- No code committed, pushed, or deployed.
+
+---
+
 ### [2026-10-09] Production Release: Migration 007 Live Execution & Release Verification
 - **Task Reference:** Final Pre-Production QA & Approved Release Execution
 - **Agent Model / ID:** Senior QA & Full-Stack Architect

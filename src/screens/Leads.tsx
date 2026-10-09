@@ -80,8 +80,8 @@ export default function Leads() {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 
-  // Phone number masking / show number toggle state
-  const [revealedLeadIds, setRevealedLeadIds] = useState<Set<string>>(new Set());
+  // Phone number tap-to-copy state
+  const [copiedLeadId, setCopiedLeadId] = useState<string | null>(null);
 
   // Call Update Panel modal state
   const [callModalLead, setCallModalLead] = useState<Lead | null>(null);
@@ -280,31 +280,36 @@ export default function Leads() {
     });
   }, [leads, activeTab, calledLeadIds, search, sourceFilter, categoryFilter, assignedFilter]);
 
-  // Mobile number masking helper (shows first 4 and last 2 digits)
-  const maskMobile = (mobile: string) => {
-    if (!mobile || mobile.length < 6) return mobile;
-    return `${mobile.slice(0, 4)}••••${mobile.slice(-2)}`;
-  };
-
-  // Toggle reveal mobile number
-  const handleToggleRevealMobile = (lead: Lead) => {
-    setRevealedLeadIds(prev => {
-      const next = new Set(prev);
-      if (next.has(lead.id)) {
-        next.delete(lead.id);
-        toast('Number masked', { icon: '🔒' });
+  // Phone number tap-to-copy handler with safe fallback
+  const handleCopyMobile = async (e: React.MouseEvent, mobile: string, leadId?: string) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!mobile) return;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(mobile);
       } else {
-        next.add(lead.id);
-        navigator.clipboard?.writeText(lead.mobile).catch(() => {});
-        toast.success(`Number revealed & copied: ${lead.mobile}`);
+        const textArea = document.createElement('textarea');
+        textArea.value = mobile;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
       }
-      return next;
-    });
+      if (leadId) {
+        setCopiedLeadId(leadId);
+        setTimeout(() => setCopiedLeadId(null), 2000);
+      }
+      toast.success('Number copied to clipboard!');
+    } catch {
+      toast.error('Failed to copy number. Please copy manually.');
+    }
   };
 
-  // Explicit Call action: reveals number, initiates phone dialer, and opens Call Update Panel
+  // Explicit Call action: initiates phone dialer, and opens Call Update Panel
   const handleInitiateCall = (lead: Lead) => {
-    setRevealedLeadIds(prev => new Set(prev).add(lead.id));
     window.open(`tel:${lead.mobile}`, '_self');
     handleOpenCallModal(lead, true);
   };
@@ -405,18 +410,27 @@ export default function Leads() {
       // 2. If status was updated by recruiter, persist it to lead record
       if (leadStatusUpdate && leadStatusUpdate !== callModalLead.category) {
         await update('leads', {
-          ...callModalLead,
+          id: callModalLead.id,
           category: leadStatusUpdate,
         });
       }
 
-      // 3. If follow-up requested, create follow-up task
+      // 3. If follow-up requested, create follow-up task with preserved scheduled time
       if (createFollowupOnCall) {
+        const timeFormatted = autoFollowupTime ? ` at ${autoFollowupTime}` : '';
+        const followupTitleWithTime = autoFollowupTitle
+          ? (autoFollowupTime && !autoFollowupTitle.includes(autoFollowupTime) ? `${autoFollowupTitle}${timeFormatted}` : autoFollowupTitle)
+          : `Follow-up: ${callModalLead.name}${timeFormatted}`;
+        const baseNote = autoFollowupNote || `Follow-up after ${callOutcome}. Call Remark: ${callNote || 'None'}`;
+        const followupNotesWithTime = autoFollowupTime
+          ? `${baseNote} [Scheduled Time: ${autoFollowupTime}]`
+          : baseNote;
+
         await createLeadFollowupTask(callModalLead.id, {
-          title: autoFollowupTitle || `Follow-up: ${callModalLead.name}`,
+          title: followupTitleWithTime,
           due_date: autoFollowupDate,
           priority: autoFollowupPriority,
-          notes: autoFollowupNote || `Follow-up after ${callOutcome}. Call Remark: ${callNote || 'None'}`,
+          notes: followupNotesWithTime,
         });
       }
 
@@ -1078,8 +1092,6 @@ export default function Leads() {
                     const isHot = !calledLeadIds.has(lead.id) && lead.category !== 'Converted';
                     const lastCall = calls[0];
                     const assignee = lead.assigned_to || 'Unassigned';
-                    const isRevealed = revealedLeadIds.has(lead.id);
-
                     return (
                       <tr key={lead.id} className="hover:bg-slate-50 transition-colors">
                         {/* Name & Contact */}
@@ -1093,16 +1105,18 @@ export default function Leads() {
                           </button>
                           <div className="font-mono text-xs flex items-center gap-1.5 mt-0.5">
                             <Phone className="w-3 h-3 text-slate-400" />
-                            <span className={isRevealed ? 'text-blue-900 font-semibold' : 'text-slate-600'}>
-                              {isRevealed ? lead.mobile : maskMobile(lead.mobile)}
-                            </span>
                             <button
                               type="button"
-                              onClick={() => handleToggleRevealMobile(lead)}
-                              title={isRevealed ? 'Click to hide/copy' : 'Reveal & copy full phone number'}
-                              className="text-slate-400 hover:text-blue-600 transition-colors p-0.5 ml-0.5"
+                              onClick={(e) => handleCopyMobile(e, lead.mobile, lead.id)}
+                              title="Click to copy phone number"
+                              className="group inline-flex items-center gap-1 font-semibold text-slate-800 hover:text-blue-600 transition-colors p-0.5 rounded hover:bg-blue-50"
                             >
-                              {isRevealed ? <EyeOff className="w-3 h-3 text-blue-600" /> : <Eye className="w-3 h-3" />}
+                              <span>{lead.mobile}</span>
+                              {copiedLeadId === lead.id ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3 h-3 text-slate-400 group-hover:text-blue-600" />
+                              )}
                             </button>
                           </div>
                           {lead.location && (
@@ -1213,22 +1227,25 @@ export default function Leads() {
                         {/* Actions: [Show Number] [Call] [Update] [Follow-up] [History] */}
                         <td className="p-3 text-right">
                           <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                            {/* 1. Show / Hide Number Button */}
+                            {/* 1. Copy Number Button */}
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => handleToggleRevealMobile(lead)}
-                              className={`text-[11px] h-7 px-2 border-slate-200 ${
-                                isRevealed ? 'text-blue-700 bg-blue-50 border-blue-200 font-semibold' : 'text-slate-600 hover:text-slate-900'
-                              }`}
-                              title={isRevealed ? 'Click to hide/copy' : 'Reveal & copy full phone number'}
+                              onClick={(e) => handleCopyMobile(e, lead.mobile, lead.id)}
+                              className="text-[11px] h-7 px-2 border-slate-200 text-slate-600 hover:text-slate-900"
+                              title="Copy phone number to clipboard"
                             >
-                              {isRevealed ? (
-                                <EyeOff className="w-3 h-3 mr-1 text-blue-600" />
+                              {copiedLeadId === lead.id ? (
+                                <>
+                                  <Check className="w-3 h-3 mr-1 text-emerald-600" />
+                                  Copied
+                                </>
                               ) : (
-                                <Eye className="w-3 h-3 mr-1 text-slate-500" />
+                                <>
+                                  <Copy className="w-3 h-3 mr-1 text-slate-500" />
+                                  Copy
+                                </>
                               )}
-                              {isRevealed ? 'Hide' : 'Show Number'}
                             </Button>
 
                             {/* 2. Call Button (initiates dialer & opens Call Update Panel) */}
@@ -1942,8 +1959,22 @@ export default function Leads() {
           title={
             <div>
               <div className="font-bold text-slate-900">{selectedLead.name}</div>
-              <div className="text-xs text-slate-500 font-normal mt-0.5">
-                {`Mobile: ${revealedLeadIds.has(selectedLead.id) ? selectedLead.mobile : maskMobile(selectedLead.mobile)} • Source: ${selectedLead.source}`}
+              <div className="text-xs text-slate-500 font-normal mt-0.5 flex items-center gap-2">
+                <span>Mobile:</span>
+                <button
+                  type="button"
+                  onClick={(e) => handleCopyMobile(e, selectedLead.mobile, selectedLead.id)}
+                  className="group inline-flex items-center gap-1 font-mono font-semibold text-slate-800 hover:text-blue-600 bg-slate-100 hover:bg-blue-50 px-1.5 py-0.5 rounded transition-colors"
+                  title="Click to copy phone number"
+                >
+                  <span>{selectedLead.mobile}</span>
+                  {copiedLeadId === selectedLead.id ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  ) : (
+                    <Copy className="w-3 h-3 text-slate-400 group-hover:text-blue-600" />
+                  )}
+                </button>
+                <span>• Source: {selectedLead.source}</span>
               </div>
             </div>
           }
@@ -1954,18 +1985,18 @@ export default function Leads() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => handleToggleRevealMobile(selectedLead)}
+                  onClick={(e) => handleCopyMobile(e, selectedLead.mobile, selectedLead.id)}
                   className="text-xs"
                 >
-                  {revealedLeadIds.has(selectedLead.id) ? (
+                  {copiedLeadId === selectedLead.id ? (
                     <>
-                      <EyeOff className="w-3.5 h-3.5 mr-1 text-blue-600" />
-                      Hide Number
+                      <Check className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                      Number Copied
                     </>
                   ) : (
                     <>
-                      <Eye className="w-3.5 h-3.5 mr-1" />
-                      Show Number
+                      <Copy className="w-3.5 h-3.5 mr-1" />
+                      Copy Number
                     </>
                   )}
                 </Button>

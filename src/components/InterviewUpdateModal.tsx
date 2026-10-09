@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useData } from '../context/DataContext';
+import { useUser } from '../context/UserContext';
 import { Modal, Button, Label, Badge } from './ui';
-import { Star, Clock, Calendar, Briefcase, User, Sparkles, AlertCircle } from 'lucide-react';
+import { Star, Clock, Calendar, Briefcase, User, Sparkles, AlertCircle, History, RotateCcw } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import { Interview, InterviewStatus, Candidate, Job, Application } from '../types';
+import { Interview, InterviewStatus, Candidate, Job, Application, RescheduleEvent } from '../types';
 
 interface InterviewUpdateModalProps {
   isOpen: boolean;
@@ -31,6 +32,14 @@ const NEXT_ACTION_SUGGESTIONS = [
   'Offer Accepted - Awaiting Joining',
 ];
 
+const RESCHEDULE_REASONS = [
+  'Candidate requested later time',
+  'Client HR rescheduled',
+  'Interviewer unavailable',
+  'Candidate travel delay',
+  'Mutual schedule adjustment',
+];
+
 export const InterviewUpdateModal: React.FC<InterviewUpdateModalProps> = ({
   isOpen,
   onClose,
@@ -40,11 +49,14 @@ export const InterviewUpdateModal: React.FC<InterviewUpdateModalProps> = ({
   onSuccess,
 }) => {
   const { candidates, jobs, applications, update } = useData();
+  const { currentUser } = useUser();
 
   const activeCandidate = candidate || candidates.find((c) => c.id === interview?.candidate_id);
   const activeJob = job || jobs.find((j) => j.id === interview?.job_id);
 
   const [scheduledTime, setScheduledTime] = useState('');
+  const [rescheduleReason, setRescheduleReason] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
   const [status, setStatus] = useState<InterviewStatus>('Scheduled');
   const [rating, setRating] = useState<number | null>(null);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
@@ -68,10 +80,22 @@ export const InterviewUpdateModal: React.FC<InterviewUpdateModalProps> = ({
       setRating(interview.rating ?? null);
       setFeedback(interview.feedback || '');
       setNextAction(interview.next_action || '');
+      setRescheduleReason('');
     }
   }, [interview]);
 
   if (!interview) return null;
+
+  const isRescheduled = (() => {
+    try {
+      if (!scheduledTime) return false;
+      const originalTime = new Date(interview.scheduled_time).getTime();
+      const newTime = new Date(scheduledTime).getTime();
+      return Math.abs(originalTime - newTime) > 60000; // difference greater than 1 minute
+    } catch {
+      return false;
+    }
+  })();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,6 +116,21 @@ export const InterviewUpdateModal: React.FC<InterviewUpdateModalProps> = ({
         rating: rating ?? null,
         next_action: nextAction.trim() || null,
       };
+
+      // Record audit history if date/time was modified
+      if (isRescheduled) {
+        const event: RescheduleEvent = {
+          previous_time: interview.scheduled_time,
+          new_time: scheduledIso,
+          rescheduled_at: new Date().toISOString(),
+          rescheduled_by: currentUser || 'SCC Staff',
+          reason: rescheduleReason.trim() || 'Schedule updated',
+        };
+        updatePayload.reschedule_history = [
+          ...(interview.reschedule_history || []),
+          event,
+        ];
+      }
 
       await update('interviews', updatePayload);
 
@@ -167,19 +206,132 @@ export const InterviewUpdateModal: React.FC<InterviewUpdateModalProps> = ({
           </Badge>
         </div>
 
-        {/* Date & Time */}
+        {/* Prominent Current Schedule & Reschedule Notice */}
+        <div className="flex items-center justify-between text-xs bg-blue-50/70 border border-blue-200/80 p-2.5 rounded-xl">
+          <div className="flex items-center gap-1.5 text-blue-950 font-medium">
+            <Clock size={14} className="text-blue-600 shrink-0" />
+            <span>Currently Scheduled:</span>
+            <strong className="text-blue-900">
+              {new Date(interview.scheduled_time).toLocaleString('en-IN', {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+              })}
+            </strong>
+          </div>
+          {interview.reschedule_history && interview.reschedule_history.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowHistory(!showHistory)}
+              className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 bg-white px-2 py-0.5 rounded-md border border-blue-200 shadow-2xs hover:bg-blue-50 transition-colors cursor-pointer"
+            >
+              <History size={12} />
+              <span>{interview.reschedule_history.length} Reschedule{interview.reschedule_history.length > 1 ? 's' : ''}</span>
+            </button>
+          )}
+        </div>
+
+        {/* Reschedule Audit History Drawer / Section */}
+        {showHistory && interview.reschedule_history && interview.reschedule_history.length > 0 && (
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs animate-in fade-in duration-100">
+            <div className="flex items-center justify-between font-bold text-slate-800 border-b border-slate-200 pb-1.5">
+              <span className="flex items-center gap-1">
+                <History size={13} className="text-blue-600" />
+                Audit Trail (Rescheduling History)
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowHistory(false)}
+                className="text-[10px] text-slate-400 hover:text-slate-600"
+              >
+                Close
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+              {interview.reschedule_history.map((ev, idx) => (
+                <div key={idx} className="p-2 bg-white border border-slate-200 rounded-lg text-[11px]">
+                  <div className="flex justify-between text-slate-500 text-[10px]">
+                    <span>
+                      {new Date(ev.rescheduled_at).toLocaleString('en-IN', {
+                        dateStyle: 'short',
+                        timeStyle: 'short',
+                      })}
+                    </span>
+                    <span className="font-semibold text-slate-700">By {ev.rescheduled_by}</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-slate-800 font-medium mt-0.5">
+                    <span className="line-through text-slate-400">
+                      {new Date(ev.previous_time).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <span className="text-blue-600">→</span>
+                    <span className="font-bold text-blue-900">
+                      {new Date(ev.new_time).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  {ev.reason && (
+                    <p className="text-slate-600 mt-0.5 italic">Reason: "{ev.reason}"</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Date & Time Picker */}
         <div>
-          <Label className="text-xs font-semibold text-slate-700 block mb-1">
-            Interview Date & Time *
-          </Label>
+          <div className="flex items-center justify-between mb-1">
+            <Label className="text-xs font-semibold text-slate-700 block mb-0">
+              {isRescheduled ? 'New Rescheduled Date & Time *' : 'Interview Date & Time *'}
+            </Label>
+            {isRescheduled && (
+              <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                Reschedule In Progress
+              </span>
+            )}
+          </div>
           <input
             type="datetime-local"
             value={scheduledTime}
             onChange={(e) => setScheduledTime(e.target.value)}
-            className="w-full text-xs border border-slate-200 rounded-lg p-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+            className={`w-full text-xs border rounded-lg p-2.5 bg-white focus:outline-none focus:ring-2 font-medium ${
+              isRescheduled
+                ? 'border-amber-400 focus:ring-amber-500 text-amber-950 bg-amber-50/20'
+                : 'border-slate-200 focus:ring-blue-500'
+            }`}
             required
           />
         </div>
+
+        {/* Reschedule Reason Box (Appears when date/time is adjusted) */}
+        {isRescheduled && (
+          <div className="p-3 bg-amber-50/70 border border-amber-200/90 rounded-xl space-y-2 text-xs animate-in fade-in duration-150">
+            <div className="flex items-center gap-1.5 font-bold text-amber-900">
+              <RotateCcw size={13} className="text-amber-600" />
+              <span>Rescheduling Reason (Audit Log) *</span>
+            </div>
+            <p className="text-[11px] text-amber-800">
+              Please document why the interview date/time was adjusted. This reason and the previous schedule will be permanently recorded in the audit history.
+            </p>
+            <input
+              type="text"
+              value={rescheduleReason}
+              onChange={(e) => setRescheduleReason(e.target.value)}
+              placeholder="e.g. Candidate requested evening slot, Client HR postponed to Friday..."
+              className="w-full text-xs border border-amber-300 rounded-lg p-2 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
+            />
+            <div className="flex flex-wrap gap-1 pt-1">
+              {RESCHEDULE_REASONS.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setRescheduleReason(r)}
+                  className="text-[10px] bg-white hover:bg-amber-100 text-amber-900 border border-amber-200 px-2 py-0.5 rounded transition-colors"
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Interview Status */}
         <div>

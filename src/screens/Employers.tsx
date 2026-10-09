@@ -11,7 +11,7 @@ import { ClientProfileDrawer } from '../components/ClientProfileDrawer';
 import { CandidateProfileDrawer } from '../components/CandidateProfileDrawer';
 
 export default function Employers() {
-  const { employers, jobs, loading, insert, update } = useData();
+  const { employers, jobs, candidates, loading, insert, update } = useData();
   const [search, setSearch] = useState('');
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -461,7 +461,7 @@ export default function Employers() {
       <ClientProfileDrawer
         isOpen={Boolean(selectedProfileEmployer)}
         onClose={() => setSelectedProfileEmployer(null)}
-        employer={selectedProfileEmployer}
+        employer={employers.find((e) => e.id === selectedProfileEmployer?.id) || selectedProfileEmployer}
         onEditEmployer={(emp) => handleOpenEdit(emp)}
         onOpenCandidateProfile={(cand) => setSelectedProfileCandidate(cand)}
       />
@@ -470,7 +470,7 @@ export default function Employers() {
       <CandidateProfileDrawer
         isOpen={Boolean(selectedProfileCandidate)}
         onClose={() => setSelectedProfileCandidate(null)}
-        candidate={selectedProfileCandidate}
+        candidate={candidates.find((c) => c.id === selectedProfileCandidate?.id) || selectedProfileCandidate}
       />
     </div>
   );

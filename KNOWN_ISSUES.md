@@ -215,4 +215,190 @@ Every future AI coding agent MUST consult this register before attempting any bu
 * **Current Status:** **VERIFIED**
 * **Verification Evidence:** Deployed in Migration 006 on Supabase Cloud `zshihpvmtvwsbwrjpugy`; live relational conversion verified in `leadsRemediation.test.ts` and live DB.
 
+---
+
+### ISSUE-013: Candidate Remarks Drawer Stale Prop Save Bug
+* **Issue ID:** `ISSUE-013` (State Management / UI Consistency)
+* **Short Title:** Candidate Profile Remarks Edit Rendered Stale Data After Save
+* **Severity:** **HIGH** (User Experience / Data Confidence)
+* **Root Cause:** In `src/components/CandidateProfileDrawer.tsx`, the component read directly from `candidate.notes` (the static prop passed when the drawer opened). When `handleSaveNotes` executed `update('candidates', { id, notes })`, `DataContext` updated its internal state, but the drawer did not resolve the live candidate entity from `candidates` collection, causing the UI to display stale remarks until a full page reload.
+* **Correct Expected Behavior:** Candidate remarks must save reliably to `candidates.notes`, show immediate saving state and success feedback, immediately reflect the newly persisted remarks in the drawer view, and survive drawer reopens and page reloads.
+* **Correct Fix:** Updated `CandidateProfileDrawer.tsx` to dynamically resolve `activeCandidate = candidates.find(c => c.id === candidate?.id) || candidate`. Added loading spinners, disabled duplicate saves, and updated all parent screens (`Candidates.tsx`, `Interviews.tsx`, `Employers.tsx`) to pass live candidate state.
+* **Regression Test Required:** `src/__tests__/recruitmentWorkflowEnhancements.test.ts`.
+* **Current Status:** **VERIFIED**
+* **Verification Evidence:** 15/15 tests passing in `recruitmentWorkflowEnhancements.test.ts`.
+
+---
+
+### ISSUE-014: Client Profile Notes Drawer Stale Prop Save Bug
+* **Issue ID:** `ISSUE-014` (State Management / UI Consistency)
+* **Short Title:** Client Profile Notes Edit Rendered Stale Data After Save
+* **Severity:** **HIGH** (User Experience / Data Confidence)
+* **Root Cause:** In `src/components/ClientProfileDrawer.tsx`, the component bound its editing state and display to the static `employer` prop passed at modal open time. After `update('employers', { id, notes })` successfully persisted to the database, the drawer continued to show the old notes from the initial prop.
+* **Correct Expected Behavior:** Client notes must save to `employers.notes`, show explicit loading and success notifications, dynamically reflect updated notes in the drawer, and never cross-contaminate or overwrite candidate remarks or interview feedback.
+* **Correct Fix:** Updated `ClientProfileDrawer.tsx` to dynamically resolve `activeEmployer = employers.find(e => e.id === employer?.id) || employer`. Added refresh trigger and synchronized updates with `Employers.tsx`.
+* **Regression Test Required:** `src/__tests__/recruitmentWorkflowEnhancements.test.ts`.
+* **Current Status:** **VERIFIED**
+* **Verification Evidence:** 15/15 tests passing in `recruitmentWorkflowEnhancements.test.ts`.
+
+---
+
+### ISSUE-015: Interview Rescheduling Overwrote Previous Schedule Without Audit Trail
+* **Issue ID:** `ISSUE-015` (Audit Integrity / History Loss)
+* **Short Title:** Rescheduling Interviews Silently Overwrote Date/Time Destroying Operational History
+* **Severity:** **HIGH** (Operational Audit Loss)
+* **Root Cause:** Previously, editing an interview's date/time in `InterviewUpdateModal` simply overwrote `interview_date` in-place. If an interview was rescheduled 2 or 3 times (due to client or candidate delays), management had zero visibility into prior dates, reschedule reasons, or who initiated the change.
+* **Correct Expected Behavior:** Rescheduling must retain the same interview record identity, record the previous date/time, new date/time, timestamp, actor, and reschedule reason in an auditable history array (`interviews.reschedule_history`), while leaving ratings and feedback intact.
+* **Correct Fix:** Added `reschedule_history` JSONB array to `Interview` interface and Migration 008. Enhanced `InterviewUpdateModal.tsx` to detect schedule changes, require a reschedule reason, and append audit events to `reschedule_history`. Added visual reschedule audit badges to `CandidateProfileDrawer` and `Interviews` list.
+* **Regression Test Required:** `src/__tests__/recruitmentWorkflowEnhancements.test.ts`.
+* **Current Status:** **VERIFIED**
+* **Verification Evidence:** 15/15 tests passing in `recruitmentWorkflowEnhancements.test.ts`.
+
+---
+
+### ISSUE-016: Missing Client and Job Opening Filtering in Candidate Profile Scheduling
+* **Issue ID:** `ISSUE-016` (Workflow Disconnect)
+* **Short Title:** Schedule Interview Modal From Candidate Profile Did Not Filter Jobs By Employer
+* **Severity:** **HIGH** (Recruiter Workflow Disconnect)
+* **Root Cause:** Clicking "Schedule Interview" from the candidate drawer opened a generic modal without dynamic employer selection or job openings filtered to that specific employer, risking invalid client/job associations.
+* **Correct Expected Behavior:** Recruiter selects an active client employer; the modal dynamically populates only active job openings belonging to that employer; changing the employer resets the job selection; candidate office screening eligibility is verified before client submission.
+* **Correct Fix:** Implemented `ScheduleInterviewModal.tsx` with dynamic Employer dropdown -> filtered active Job dropdown, candidate summary, office screening check/override warning, and atomic application linking via `scheduleInterviewWithApplication`.
+* **Regression Test Required:** `src/__tests__/recruitmentWorkflowEnhancements.test.ts`.
+* **Current Status:** **VERIFIED**
+* **Verification Evidence:** 15/15 tests passing in `recruitmentWorkflowEnhancements.test.ts`.
+
+---
+
+### ISSUE-017: Recruiter Task Creation Failed Due to Missing created_by RLS Attribution
+* **Issue ID:** `ISSUE-017` (Security & Attribution / RLS)
+* **Short Title:** Frontline Recruiter Task Creation Failed with PostgreSQL 42501
+* **Severity:** **CRITICAL / P0**
+* **Root Cause:** In PostgreSQL `tasks.created_by` has `DEFAULT NULL`. `tasks_insert_policy` enforces `WITH CHECK ((created_by = auth.uid()) OR is_admin())`. `Tasks.tsx` previously omitted `created_by` from the insert payload, causing RLS rejection for non-admin recruiters.
+* **Correct Fix:** Updated `Tasks.tsx` to pass `created_by: userId` from `useUser()`. Added defense-in-depth in `DataContext.insert` to auto-populate `created_by: session.user.id` if omitted. Prepared Migration 009 setting `ALTER TABLE public.tasks ALTER COLUMN created_by SET DEFAULT auth.uid();` and adding `trg_tasks_set_created_by` trigger.
+* **Regression Test Required:** `src/__tests__/remediationPhase1.test.ts`.
+* **Current Status:** **VERIFIED**
+* **Verification Evidence:** 12/12 tests passing in `remediationPhase1.test.ts`.
+
+---
+
+### ISSUE-018: Offline Concurrency Control Update Replay Resurrected Deleted Records
+* **Issue ID:** `ISSUE-018` (Data Consistency / Offline Safety)
+* **Short Title:** Replaying Stale Offline OCC Update Upserted and Resurrected Deleted Database Records
+* **Severity:** **HIGH / P1**
+* **Root Cause:** In `DataContext.tsx` OCC update branch, if 0 rows were updated and `remoteExisting` was null, the handler previously ran `supabase.from(table).upsert(payload)`, resurrecting records deleted by another user.
+* **Correct Fix:** Updated `DataContext.tsx` to return `RECORD_NOT_FOUND` error. Enhanced `isPermanentError` in `offlineQueue.ts` to identify `RECORD_NOT_FOUND`, `42P01`, `PGRST204` as permanent errors, routing poisoned or unexecutable mutations directly to the Dead Letter Queue (DLQ).
+* **Regression Test Required:** `src/__tests__/remediationPhase1.test.ts`.
+* **Current Status:** **VERIFIED**
+* **Verification Evidence:** 12/12 tests passing in `remediationPhase1.test.ts`.
+
+---
+
+### ISSUE-019: Offline Queue Lacked Actor Scoping and Dead Letter Queue Recovery UI/APIs
+* **Issue ID:** `ISSUE-019` (Offline Isolation / Disaster Recovery)
+* **Short Title:** Offline Mutations Replayed Under Different Logged-In User & DLQ Items Inaccessible
+* **Severity:** **HIGH / P1**
+* **Root Cause:** Mutations queued in IndexedDB lacked author `userId`, risking replaying User A's mutations under User B's active session. Furthermore, Dead Letter Queue items had no inspection or retry methods.
+* **Correct Fix:** Added `userId` scoping to `QueuedMutation` and `enqueueMutation()`. In `processOfflineQueue()`, added actor scoping guard skipping mutations where `mutation.userId !== options.currentUserId`. Added `getDeadLetterMutations()`, `retryDeadLetterMutation()`, `removeDeadLetterMutation()`, and `clearDeadLetterQueue()`.
+* **Regression Test Required:** `src/__tests__/remediationPhase1.test.ts`.
+* **Current Status:** **VERIFIED**
+* **Verification Evidence:** 12/12 tests passing in `remediationPhase1.test.ts`.
+
+---
+
+### ISSUE-020: Inactive Profile Allowed Workspace UI Access
+* **Issue ID:** `ISSUE-020` (Access Control & Profile Eligibility)
+* **Short Title:** Inactive Accounts (`is_active = false`) Accessed Workspace Due to Incomplete App Guard
+* **Severity:** **HIGH / P1**
+* **Root Cause:** In `App.tsx`, the production auth guard only checked `!user`. If a deactivated user signed in with valid credentials, `profile.is_active` was ignored in the routing layer, allowing unauthorized view of candidate data.
+* **Correct Fix:** Updated `App.tsx` to verify `profile.is_active !== false` and `profile !== null`. Inactive users and orphaned auth accounts are rendered a secure blocking screen with primary owner contact (`vikasnayakrgh@gmail.com`) and a Sign Out button.
+* **Regression Test Required:** `src/__tests__/remediationPhase1.test.ts`.
+* **Current Status:** **VERIFIED**
+* **Verification Evidence:** 12/12 tests passing in `remediationPhase1.test.ts`.
+
+---
+
+### ISSUE-021: Lead Call Follow-up Time Dropped & Untruthful Candidate Call Logging
+* **Issue ID:** `ISSUE-021` (Recruitment Operations & Audit Truthfulness)
+* **Short Title:** Promised Follow-up Time Dropped in Leads & Candidate Call Dialer Treated as Connected
+* **Severity:** **MEDIUM / P2**
+* **Root Cause:** `Leads.tsx` captured `autoFollowupTime = '11:00'` but never passed it to `createLeadFollowupTask()`. `CandidateProfileDrawer.tsx` hardcoded `call_type: 'Connected'` on clicking telephone link.
+* **Correct Fix:** In `Leads.tsx`, integrated `autoFollowupTime` into task title and notes, and replaced full-object spread with `{ id, category }`. In `CandidateProfileDrawer.tsx`, introduced interactive call logging modal with truthful outcome selection (`Connected`, `Busy`, `No Answer`, `SwitchOff`, etc.) and duration tracking.
+* **Regression Test Required:** `src/__tests__/remediationPhase1.test.ts`.
+* **Current Status:** **VERIFIED**
+* **Verification Evidence:** 12/12 tests passing in `remediationPhase1.test.ts`.
+
+---
+
+### ISSUE-022: Migration 008 RLS Policies Permitted Deactivated Staff Access & Unrestricted Updates
+* **Issue ID:** `ISSUE-022` (Database Security / RLS Policy Gap)
+* **Short Title:** Candidate Screenings Table Had `USING (true)` and Unrestricted Write Access
+* **Severity:** **HIGH / P1**
+* **Root Cause:** In draft Migration 008, `screenings_select_policy` specified `USING (true)`, allowing deactivated employees (`is_active = false`) with valid JWTs to inspect confidential interview remarks and candidate ratings. Furthermore, `screenings_update_policy` specified `USING (auth.uid() IS NOT NULL)`, allowing any authenticated user to tamper with any other recruiter's screening assessments.
+* **Correct Fix:** Remediated `20261009000008_office_screening_and_reschedule_history.sql`:
+  1. `screenings_select_policy` and `screenings_insert_policy` enforce `EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND is_active = true)`.
+  2. `screenings_update_policy` restricts updates to the record creator (`created_by = auth.uid()`) or an active administrator/manager (`public.is_admin_or_manager()`).
+  3. Added `DEFAULT auth.uid()` to `candidate_screenings.created_by` and expanded client attribution guard in `DataContext.tsx`.
+  4. Changed `overall_rating` to `numeric(3,1)` to support fractional ratings like 4.5.
+* **Regression Test Required:** `src/__tests__/migrationSafetyAndRemediation.test.ts` (covers active vs inactive access, unauthorized updates, creator attribution, and decimal ratings).
+* **Current Status:** **VERIFIED (Local Fix & Tests Passing)**
+* **Verification Evidence:** 31/31 tests passing in `migrationSafetyAndRemediation.test.ts`.
+
+---
+
+### ISSUE-023: Payment Status Check Constraint Blocked Registration Fee Refund Tracking
+* **Issue ID:** `ISSUE-023` (Database Constraint Conflict)
+* **Short Title:** `payment_records_status_check` Lacked `'Refunded'` Status Support
+* **Severity:** **HIGH / P1**
+* **Root Cause:** In `20261002000001_core_schema.sql`, `payment_records_status_check` only permitted `('Paid', 'Partial', 'Pending')`. In `CandidateProfileDrawer.tsx`, recording candidate registration fee refunds inserts `{ type: 'Candidate_Registration', status: 'Refunded' }`, causing PostgreSQL error `23514` (`check_violation`).
+* **Correct Fix:** Added constraint expansion to `20261009000008_office_screening_and_reschedule_history.sql`:
+  ```sql
+  ALTER TABLE public.payment_records ADD CONSTRAINT payment_records_status_check CHECK (status IN ('Paid', 'Partial', 'Pending', 'Refunded'));
+  ```
+* **Regression Test Required:** `src/__tests__/migrationSafetyAndRemediation.test.ts`.
+* **Current Status:** **VERIFIED (Local Fix & Tests Passing)**
+* **Verification Evidence:** 31/31 tests passing in `migrationSafetyAndRemediation.test.ts`.
+
+---
+
+### ISSUE-024: Migration 009 Trigger Procedure Lacked Function Privilege Hardening
+* **Issue ID:** `ISSUE-024` (Database Governance & Constitution Compliance)
+* **Short Title:** Procedure `trg_tasks_set_created_by_fn` Lacked Explicit Revocation from PUBLIC
+* **Severity:** **MEDIUM / P2**
+* **Root Cause:** PostgreSQL defaults to granting `EXECUTE` on newly created functions to `PUBLIC`. In draft Migration 009, `trg_tasks_set_created_by_fn()` omitted the mandatory AGENTS.md Constitution Section C.2 revocation clauses.
+* **Correct Fix:** Updated `20261009000009_tasks_attribution_and_candidate_visibility.sql` to explicitly append:
+  ```sql
+  REVOKE ALL ON FUNCTION public.trg_tasks_set_created_by_fn() FROM anon, public;
+  GRANT EXECUTE ON FUNCTION public.trg_tasks_set_created_by_fn() TO authenticated;
+  ```
+* **Regression Test Required:** `src/__tests__/migrationSafetyAndRemediation.test.ts`.
+* **Current Status:** **VERIFIED (Local Fix & Tests Passing)**
+### ISSUE-025: Registration Fee Accounting & Ledger Reconciliation
+* **Issue ID:** `ISSUE-025` (Financial Accounting & Ledger Integrity)
+* **Short Title:** Registration Fee Ledger Lacked Over-Refund Protection and Database Net Sync Trigger
+* **Severity:** **HIGH / P1**
+* **Root Cause:** Recording refunds in `CandidateProfileDrawer.tsx` lacked validation to prevent over-refunding (e.g. refunding more than net received or refunding ₹0 balance candidates), and did not synchronize candidate `registration_fee_paid` boolean downward upon refund. Furthermore, the database trigger `trg_sync_candidate_registration_fee()` only checked `EXISTS (status = 'Paid')`, meaning even after a 100% refund, the candidate remained marked as paid.
+* **Correct Fix:**
+  1. Created pure domain module `src/lib/registrationFee.ts` providing `calculateRegistrationFeeStatus` and `validateRegistrationRefund` with over-refund and duplicate-refund protection.
+  2. Integrated `src/lib/registrationFee.ts` into `CandidateProfileDrawer.tsx` and `DataContext.tsx`.
+  3. Updated `trg_sync_candidate_registration_fee()` in Migration 008 to compute net balance: $\sum(\text{Paid} + \text{Partial}) - \sum(\text{Refunded}) \ge 200$.
+* **Regression Test Required:** `src/__tests__/recruitmentWorkflowEnhancements.test.ts`.
+* **Current Status:** **VERIFIED**
+* **Verification Evidence:** 31/31 tests passing in `recruitmentWorkflowEnhancements.test.ts`.
+
+---
+
+### ISSUE-026: Unmigrated Tables Trapped in Dead Letter Queue on Initial Sync
+* **Issue ID:** `ISSUE-026` (Offline Synchronization & Migration Resilience)
+* **Short Title:** Missing Table Errors (`42P01`) Trapped Mutations in DLQ on Attempt 1
+* **Severity:** **HIGH / P1**
+* **Root Cause:** `offlineQueue.ts:isPermanentError()` classified `42P01` and schema cache errors as permanent errors. As a result, mutations for newly introduced tables (such as `candidate_screenings` created before Migration 008 is deployed) were immediately routed to the Dead Letter Queue without retrying, preventing automatic sync once Migration 008 was deployed.
+* **Correct Fix:**
+  1. Updated `offlineQueue.ts` so `isMissingTableOrSchemaError()` returns `true` and `isPermanentError()` returns `false` for unmigrated schema errors.
+  2. Unmigrated mutations undergo transient retries with exponential backoff (up to 5 attempts) and only transition to DLQ if retries exhaust.
+  3. Added `retryDeadLetterMutationsForTable()` to allow reviving DLQ mutations en masse once migrations are applied.
+* **Regression Test Required:** `src/__tests__/recruitmentWorkflowEnhancements.test.ts` & `src/__tests__/remediationPhase1.test.ts`.
+* **Current Status:** **VERIFIED**
+* **Verification Evidence:** 31/31 tests passing in `recruitmentWorkflowEnhancements.test.ts` and 12/12 in `remediationPhase1.test.ts`.
+
+
 

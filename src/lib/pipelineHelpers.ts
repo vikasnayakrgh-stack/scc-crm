@@ -1,4 +1,4 @@
-import { Application } from '../types';
+import { Application, Job } from '../types';
 
 export interface ScheduleInterviewParams {
   candidateId: string;
@@ -128,4 +128,21 @@ export function shouldUpdateCandidateRegistrationPaid(
   status: string
 ): boolean {
   return paymentType === 'Candidate_Registration' && status === 'Paid';
+}
+
+/**
+ * P1-04: Filters open jobs belonging exclusively to the specified employer ID or company name.
+ */
+export function filterActiveJobsForEmployer(
+  jobs: Job[],
+  employerId: string,
+  companyName?: string
+): Job[] {
+  if (!employerId) return [];
+  return jobs.filter(
+    (j) =>
+      (j.employer_id === employerId || (companyName && j.company_name === companyName)) &&
+      j.is_active !== false &&
+      j.status === 'Open'
+  );
 }

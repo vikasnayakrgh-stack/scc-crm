@@ -16,6 +16,7 @@ export interface Candidate {
   current_salary?: number;
   source?: string;
   notes?: string;
+  screening_status?: CandidateScreeningStatus;
   owner_id: string;
   is_active: boolean;
 }
@@ -90,6 +91,14 @@ export interface Application {
 
 export type InterviewStatus = 'Scheduled' | 'Done' | 'NoShow' | 'Selected' | 'Rejected' | 'On Hold';
 
+export interface RescheduleEvent {
+  previous_time: string;
+  new_time: string;
+  rescheduled_at: string;
+  rescheduled_by: string;
+  reason?: string;
+}
+
 export interface Interview {
   id: string;
   created_at: string;
@@ -102,6 +111,7 @@ export interface Interview {
   feedback: string; // Interview Remarks / Feedback
   rating?: number | null; // Rating: ⭐ 1-5
   next_action?: string | null;
+  reschedule_history?: RescheduleEvent[];
   is_active: boolean;
   // Joins for UI
   candidates?: Candidate;
@@ -135,12 +145,15 @@ export interface CallLog {
   leads?: Lead;
 }
 
+export type TaskKanbanStatus = 'To Do' | 'In Progress' | 'Waiting' | 'Completed';
+
 export interface FollowUpTask {
   id: string;
   created_at: string;
   due_date: string;
   title: string;
   notes?: string;
+  next_action?: string;
   entity_type: 'candidate' | 'employer' | 'application' | 'general' | 'lead';
   entity_id: string;
   lead_entity_id?: string | null;
@@ -151,11 +164,37 @@ export interface FollowUpTask {
   assigned_to_user_id?: string | null;
   created_by?: string | null;
   priority: 'Low' | 'Medium' | 'High';
-  status: 'Pending' | 'Completed' | 'Cancelled';
+  status: 'Pending' | 'To Do' | 'In Progress' | 'Waiting' | 'Completed' | 'Cancelled';
+  kanban_status?: TaskKanbanStatus;
   completed_at?: string;
   is_active: boolean;
   // Joins
   leads?: Lead;
+  candidates?: Candidate;
+}
+
+export type CandidateScreeningResult = 'Pass' | 'Hold' | 'Fail';
+export type CandidateScreeningStatus = 'Pending' | 'Scheduled' | 'Pass' | 'Hold' | 'Fail';
+
+export interface CandidateScreening {
+  id: string;
+  created_at: string;
+  updated_at?: string;
+  candidate_id: string;
+  screening_time: string;
+  venue: string;
+  skills_assessment?: string;
+  communication_rating?: number | null; // 1-5
+  confidence_rating?: number | null; // 1-5
+  overall_rating?: number | null; // 1-5
+  remarks?: string;
+  result: CandidateScreeningResult;
+  next_action?: string;
+  followup_date?: string;
+  screening_staff: string;
+  created_by?: string;
+  is_active: boolean;
+  // Joins for UI
   candidates?: Candidate;
 }
 
@@ -246,7 +285,7 @@ export interface PaymentRecord {
   type: 'Candidate_Registration' | 'Employer_Placement' | 'Other';
   amount: number;
   payment_method: 'UPI' | 'Cash' | 'Bank_Transfer' | 'Cheque';
-  status: 'Paid' | 'Partial' | 'Pending';
+  status: 'Paid' | 'Partial' | 'Pending' | 'Refunded';
   candidate_id?: string;
   job_id?: string;
   employer_id?: string;

@@ -1385,8 +1385,11 @@ export default function Candidates() {
       <CandidateProfileDrawer
         isOpen={Boolean(selectedProfileCandidate)}
         onClose={() => setSelectedProfileCandidate(null)}
-        candidate={selectedProfileCandidate}
-        onEditCandidate={(c) => handleOpenEdit(c)}
+        candidate={candidates.find((c) => c.id === selectedProfileCandidate?.id) || selectedProfileCandidate}
+        onEditCandidate={(c) => {
+          setSelectedProfileCandidate(c);
+          handleOpenEdit(c);
+        }}
         onScheduleInterview={(c) => setSelectedCandidate(c)}
       />
     </div>
