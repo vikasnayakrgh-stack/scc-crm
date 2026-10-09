@@ -60,24 +60,71 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    // 1. Initial session load
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id).finally(() => setLoading(false));
-      } else {
+    let isMounted = true;
+    let initialLoadComplete = false;
+
+    // Safety timeout: Guarantee the UI NEVER hangs on "Verifying secure session..." longer than 3 seconds
+    const safetyTimer = setTimeout(() => {
+      if (isMounted && !initialLoadComplete) {
+        console.warn('Session verification timed out after 3000ms. Revealing login screen.');
         setLoading(false);
       }
-    });
+    }, 3000);
+
+    // 1. Initial session load with resilient error handling
+    const initSession = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          console.warn('Supabase getSession error:', error);
+          if (isMounted) {
+            setUser(null);
+            setSession(null);
+            setProfile(null);
+          }
+          return;
+        }
+
+        const activeSession = data?.session ?? null;
+        if (isMounted) {
+          setSession(activeSession);
+          setUser(activeSession?.user ?? null);
+          if (activeSession?.user) {
+            await fetchProfile(activeSession.user.id);
+          } else {
+            setProfile(null);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to resolve initial auth session:', err);
+        if (isMounted) {
+          setUser(null);
+          setSession(null);
+          setProfile(null);
+        }
+      } finally {
+        if (isMounted) {
+          initialLoadComplete = true;
+          clearTimeout(safetyTimer);
+          setLoading(false);
+        }
+      }
+    };
+
+    initSession();
 
     // 2. Auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, newSession) => {
+        if (!isMounted) return;
         setSession(newSession);
         setUser(newSession?.user ?? null);
         if (newSession?.user) {
-          await fetchProfile(newSession.user.id);
+          try {
+            await fetchProfile(newSession.user.id);
+          } catch (e) {
+            console.warn('Error fetching profile on auth state change:', e);
+          }
         } else {
           setProfile(null);
         }
@@ -86,6 +133,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
 
     return () => {
+      isMounted = false;
+      clearTimeout(safetyTimer);
       subscription.unsubscribe();
     };
   }, [fetchProfile]);

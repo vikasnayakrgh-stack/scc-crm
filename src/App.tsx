@@ -30,9 +30,21 @@ function AppContent() {
     if (loading) {
       return (
         <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4">
-          <div className="w-10 h-10 border-3 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
+          <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
           <p className="text-sm font-semibold text-slate-200">Verifying secure session...</p>
           <p className="text-xs text-slate-400 mt-1">Shree Career Consultancy • SCC CRM</p>
+          <button
+            onClick={() => {
+              try {
+                localStorage.clear();
+                sessionStorage.clear();
+              } catch {}
+              window.location.reload();
+            }}
+            className="mt-6 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 rounded-lg border border-slate-700 transition"
+          >
+            Taking too long? Reset Session
+          </button>
         </div>
       );
     }
